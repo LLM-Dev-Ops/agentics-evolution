@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import pg from "pg";
 import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
-  idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant
+  idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
+  withSerializableRetry
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -48,6 +49,18 @@ test("100 serializable contenders cannot overspend alpha or budget", { skip: !ur
       assert.equal(outcomes.find((item) => item.status === "fulfilled").value.remaining, 0n);
     }
   } finally { await database.close(); }
+});
+
+test("serializable retry is bounded, jittered and never retries permanent errors", async () => {
+  let attempts = 0; const delays = [];
+  const result = await withSerializableRetry(async () => {
+    attempts++; if (attempts < 3) throw Object.assign(new Error("serialization"), { code: "40001" }); return "committed";
+  }, { maxAttempts: 5, baseDelayMs: 10, deadlineMs: Date.now() + 1_000, random: () => 0.5, sleep: async (delay) => { delays.push(delay); } });
+  assert.equal(result, "committed"); assert.equal(attempts, 3); assert.deepEqual(delays, [5, 10]);
+  attempts = 0;
+  await assert.rejects(withSerializableRetry(async () => { attempts++; throw Object.assign(new Error("constraint"), { code: "23505" }); },
+    { maxAttempts: 5, baseDelayMs: 10, deadlineMs: Date.now() + 1_000, sleep: async () => undefined }), /constraint/);
+  assert.equal(attempts, 1);
 });
 
 test("authorization consumption and champion CAS have one winner", { skip: !url }, async () => {

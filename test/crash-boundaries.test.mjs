@@ -62,5 +62,9 @@ test("broker acceptance before delivery mark may republish but inbox applies one
     const first = await consumeOnce(database, tenant, "crash-consumer", physical[0].envelope, async () => ++effects);
     const duplicate = await consumeOnce(database, tenant, "crash-consumer", physical[1].envelope, async () => ++effects);
     assert.equal(first.duplicate, false); assert.equal(duplicate.duplicate, true); assert.equal(effects, 1);
+    const altered = { ...physical[1].envelope, payload: { altered: true } };
+    await assert.rejects(consumeOnce(database, tenant, "crash-consumer", altered, async () => ++effects), /INBOX_EVENT_DIGEST_CONFLICT/);
+    await assert.rejects(consumeOnce(database, "foreign-tenant", "crash-consumer", physical[1].envelope, async () => ++effects), /EVENT_TENANT_MISMATCH/);
+    assert.equal(effects, 1);
   } finally { await database.close(); }
 });

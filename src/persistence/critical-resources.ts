@@ -22,20 +22,20 @@ export class CriticalResourceStore {
   }
   async consumeAuthorization(command: ResourceCommand): Promise<number> {
     if (command.resourceType !== "authorization") throw new TypeError("authorization resource required");
-    return this.database.tenantTransaction(command.tenantId, "SERIALIZABLE", async (client) => {
+    return withSerializableRetry(() => this.database.tenantTransaction(command.tenantId, "SERIALIZABLE", async (client) => {
       const result = await client.query<{ version: string }>(`UPDATE critical_resources SET consumed=true,version=version+1 WHERE tenant_id=$1 AND repository_id=$2
         AND resource_type='authorization' AND resource_id=$3 AND version=$4 AND consumed=false RETURNING version`,
         [command.tenantId, command.repositoryId, command.resourceId, command.expectedVersion]);
       if (!result.rows[0]) throw Object.assign(new Error("AUTHORIZATION_ALREADY_CONSUMED"), { code: "40900" }); return Number(result.rows[0].version);
-    });
+    }), { maxAttempts: 5, baseDelayMs: 5, deadlineMs: Date.now() + 5_000 });
   }
   async changeChampion(command: ResourceCommand, value: Readonly<Record<string, unknown>>): Promise<number> {
     if (command.resourceType !== "champion") throw new TypeError("champion resource required");
-    return this.database.tenantTransaction(command.tenantId, "SERIALIZABLE", async (client) => {
+    return withSerializableRetry(() => this.database.tenantTransaction(command.tenantId, "SERIALIZABLE", async (client) => {
       const result = await client.query<{ version: string }>(`UPDATE critical_resources SET value=$5,version=version+1 WHERE tenant_id=$1 AND repository_id=$2
         AND resource_type='champion' AND resource_id=$3 AND version=$4 RETURNING version`,
         [command.tenantId, command.repositoryId, command.resourceId, command.expectedVersion, value]);
       if (!result.rows[0]) throw Object.assign(new Error("CHAMPION_VERSION_CONFLICT"), { code: "40900" }); return Number(result.rows[0].version);
-    });
+    }), { maxAttempts: 5, baseDelayMs: 5, deadlineMs: Date.now() + 5_000 });
   }
 }

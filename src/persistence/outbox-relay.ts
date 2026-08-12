@@ -1,6 +1,8 @@
 import type pg from "pg";
 import { randomUUID } from "node:crypto";
 import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
+import { canonicalJson } from "../shared-kernel/immutable.js";
+import { digestBytes } from "../shared-kernel/digest.js";
 import type { EventTransport, TransportMessage } from "../messaging/transport.js";
 import { PostgresPersistence } from "./postgres.js";
 
@@ -50,10 +52,16 @@ export class OutboxRelay {
 
 export async function consumeOnce<T>(database: PostgresPersistence, tenantId: string, consumer: string, event: EvolutionEnvelope,
   effect: (client: pg.PoolClient) => Promise<T>): Promise<{ duplicate: boolean; result?: T }> {
+  if (event.tenantId !== tenantId) throw new TypeError("EVENT_TENANT_MISMATCH");
+  const envelopeDigest = digestBytes(new TextEncoder().encode(canonicalJson(event)));
   return database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
     const inserted = await client.query("INSERT INTO inbox(tenant_id,consumer,event_id,payload_digest) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING RETURNING event_id",
-      [tenantId, consumer, event.id, event.evidence[0]?.sha256 ?? "0".repeat(64)]);
-    if (!inserted.rowCount) return { duplicate: true };
+      [tenantId, consumer, event.id, envelopeDigest]);
+    if (!inserted.rowCount) {
+      const prior = await client.query("SELECT payload_digest FROM inbox WHERE tenant_id=$1 AND consumer=$2 AND event_id=$3", [tenantId, consumer, event.id]);
+      if (prior.rows[0]?.payload_digest !== envelopeDigest) throw new TypeError("INBOX_EVENT_DIGEST_CONFLICT");
+      return { duplicate: true };
+    }
     return { duplicate: false, result: await effect(client) };
   });
 }
