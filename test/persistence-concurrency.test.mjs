@@ -214,9 +214,12 @@ test("delayed and reordered delivery cannot violate aggregate version applicatio
 test("Pub/Sub emulator uses the same validated message contract and redelivers nack", { skip: !process.env.PUBSUB_EMULATOR_HOST }, async () => {
   const projectId = "agentics-test"; const client = new PubSub({ projectId });
   const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const deadLetterTopicName = "evolution.deadletter.v1";
-  const subscriptionName = `agentics-events-${suffix}`; const poisonSubscription = `agentics-poison-${suffix}`; const deadLetterSubscription = `agentics-dead-${suffix}`;
+  const replayTopicName = "evolution.replay.v1"; const subscriptionName = `agentics-events-${suffix}`; const poisonSubscription = `agentics-poison-${suffix}`;
+  const deadLetterSubscription = `agentics-dead-${suffix}`; const replaySubscription = `agentics-replay-${suffix}`;
   const [topic] = await client.createTopic(topicName); const [deadLetterTopic] = await client.createTopic(deadLetterTopicName);
+  const [replayTopic] = await client.createTopic(replayTopicName);
   await topic.createSubscription(subscriptionName, { ackDeadlineSeconds: 10 }); await deadLetterTopic.createSubscription(deadLetterSubscription, { ackDeadlineSeconds: 10 });
+  await replayTopic.createSubscription(replaySubscription, { ackDeadlineSeconds: 10 });
   const envelope = messageEnvelope(41); const message = { envelope, orderingKey: "tenant-a/repo-a/transport-a",
     attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } };
   const publisher = new GooglePubSubTransport(client); const poisonSink = new GooglePubSubPoisonSink(client);
@@ -225,6 +228,9 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
   }), poisonSink);
   try {
     await deliveryContract(() => publisher.publish(topicName, message), consumer, subscriptionName, message);
+    const pubsubReplay = new ReplayTransport(publisher); const dryRun = replayEffectPolicy("DRY_RUN", envelope);
+    await pubsubReplay.publish(message, dryRun); const replayDelivery = await consumer.receiveOne(replaySubscription);
+    assert.equal(replayDelivery.message.attributes.replay, "true"); assert.equal(replayDelivery.message.attributes.effectMode, "DRY_RUN"); await replayDelivery.ack();
     await topic.createSubscription(poisonSubscription, { ackDeadlineSeconds: 10 });
     await topic.publishMessage({ data: Buffer.from("{malformed"), orderingKey: message.orderingKey,
       attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId, traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", secret: "must-not-propagate" } });
@@ -249,7 +255,7 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
     await assert.rejects(poisonSink.redrive({ ...poison, payloadBase64: Buffer.from("tampered").toString("base64") }, topicName, redriveCapability), /POISON_PAYLOAD_DIGEST_MISMATCH/);
   } finally {
     await client.subscription(subscriptionName).delete().catch(() => undefined); await client.subscription(poisonSubscription).delete().catch(() => undefined);
-    await client.subscription(deadLetterSubscription).delete().catch(() => undefined);
-    await topic.delete().catch(() => undefined); await deadLetterTopic.delete().catch(() => undefined); await client.close();
+    await client.subscription(deadLetterSubscription).delete().catch(() => undefined); await client.subscription(replaySubscription).delete().catch(() => undefined);
+    await topic.delete().catch(() => undefined); await deadLetterTopic.delete().catch(() => undefined); await replayTopic.delete().catch(() => undefined); await client.close();
   }
 });
