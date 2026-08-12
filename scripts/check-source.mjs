@@ -33,6 +33,7 @@ function inspectModuleReference(file, specifier) {
   const adapter = policy.allowedUpstreamAdapters[dependency];
   if (!adapter) return;
   const location = rel(file);
+  if (location.startsWith("test/") && policy.upstreamContractTests.includes(location)) return;
   if (location !== adapter && !location.startsWith(`${adapter}/`))
     errors.push(`${location}: upstream import/export '${specifier}' must be owned by ${adapter}`);
 

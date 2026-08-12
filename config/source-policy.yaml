@@ -2,6 +2,7 @@ schemaVersion: agentics.source-policy/v1
 maxLines: 500
 scanRoots: [src, scripts, test, config]
 publicEntrypoints: [src/index.ts]
+upstreamContractTests: [test/upstream-contracts.test.mjs]
 layers:
   domain: src/domain
   application: src/application
