@@ -5,6 +5,8 @@ export const MAX_ENVELOPE_BYTES = 262_144;
 export interface TransportMessage { readonly envelope: EvolutionEnvelope; readonly orderingKey: string; readonly attributes: Readonly<Record<string, string>>; }
 export interface PublishReceipt { readonly messageId: string; }
 export interface EventTransport { publish(topic: string, message: TransportMessage): Promise<PublishReceipt>; }
+export interface TransportDelivery { readonly messageId: string; readonly message: TransportMessage; ack(): Promise<void>; nack(): Promise<void> | void; }
+export interface DeliverySource { receiveOne(channel: string, timeoutMs?: number): Promise<TransportDelivery>; }
 
 export function validateTransportMessage(message: TransportMessage): Uint8Array {
   const bytes = encodeEnvelope(message.envelope);

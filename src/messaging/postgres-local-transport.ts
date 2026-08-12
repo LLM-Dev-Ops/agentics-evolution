@@ -1,5 +1,5 @@
 import { newEventId } from "../shared-kernel/uuid-v7.js";
-import type { EventTransport, PublishReceipt, TransportMessage } from "./transport.js";
+import type { DeliverySource, EventTransport, PublishReceipt, TransportDelivery, TransportMessage } from "./transport.js";
 import { validateTransportMessage } from "./transport.js";
 import type { PostgresPersistence } from "../persistence/postgres.js";
 
@@ -49,5 +49,19 @@ export class PostgresLocalTransport implements EventTransport {
     await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query(
       "UPDATE local_transport_messages SET available_at=$3,lease_token=NULL,lease_expires_at=NULL WHERE tenant_id=$1 AND message_id=$2 AND acked_at IS NULL",
       [tenantId, messageId, availableAt]).then((result) => { if (result.rowCount !== 1) throw new Error("MESSAGE_NOT_FOUND"); }));
+  }
+}
+
+export class PostgresLocalConsumer implements DeliverySource {
+  constructor(readonly transport: PostgresLocalTransport, readonly tenantId: string) {}
+  async receiveOne(channel: string, timeoutMs = 10_000): Promise<TransportDelivery> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const row = (await this.transport.pull(this.tenantId, channel, 1))[0];
+      if (row) return { messageId: row.messageId, message: row.message,
+        ack: () => this.transport.ack(this.tenantId, row.messageId, row.leaseToken), nack: () => this.transport.nack(this.tenantId, row.messageId, row.leaseToken) };
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("LOCAL_RECEIVE_TIMEOUT");
   }
 }

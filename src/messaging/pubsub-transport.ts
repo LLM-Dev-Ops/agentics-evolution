@@ -1,6 +1,6 @@
 import { PubSub, type Message } from "@google-cloud/pubsub";
 import { createHash } from "node:crypto";
-import type { EventTransport, PublishReceipt, TransportMessage } from "./transport.js";
+import type { DeliverySource, EventTransport, PublishReceipt, TransportDelivery, TransportMessage } from "./transport.js";
 import { validateTransportMessage } from "./transport.js";
 import { assertVerifiedReplayCapability, type VerifiedReplayCapability } from "./replay.js";
 
@@ -14,12 +14,7 @@ export class GooglePubSubTransport implements EventTransport {
   }
 }
 
-export interface PubSubDelivery {
-  readonly messageId: string;
-  readonly message: TransportMessage;
-  ack(): Promise<void>;
-  nack(): void;
-}
+export interface PubSubDelivery extends TransportDelivery {}
 
 export interface PoisonMessageRecord { readonly messageId: string; readonly subscription: string; readonly reason: string;
   readonly payloadSha256: string; readonly payloadBase64: string; readonly attributes: Readonly<Record<string, string>>; readonly orderingKey: string; }
@@ -41,7 +36,7 @@ export class GooglePubSubPoisonSink implements PoisonMessageSink {
   }
 }
 
-export class GooglePubSubConsumer {
+export class GooglePubSubConsumer implements DeliverySource {
   constructor(readonly client: PubSub, readonly decode: (bytes: Uint8Array, attributes: Readonly<Record<string, string>>, orderingKey: string) => TransportMessage,
     readonly poisonSink: PoisonMessageSink) {}
   async receiveOne(subscriptionName: string, timeoutMs = 10_000): Promise<PubSubDelivery> {

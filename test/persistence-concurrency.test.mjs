@@ -5,7 +5,7 @@ import { PubSub } from "@google-cloud/pubsub";
 import { generateKeyPairSync, sign } from "node:crypto";
 import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
-  idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
+  idempotencyKey, PostgresPersistence, PostgresLocalTransport, PostgresLocalConsumer, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
   withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES,
   ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, ReplayEffectExecutor, OrderedEnvelopeConsumer, canonicalJson
 } from "../dist/index.js";
@@ -24,6 +24,10 @@ function messageEnvelope(seed, tenant = "tenant-a", aggregate = "transport-a", k
     evidence: [digestReference({ uri: `cas://sha256/${digest}`, sha256: digest })], payload: { tenantId: tenant, repositoryId: "repo-a" } });
 }
 const criticalAudit = (seed, resourceId) => ({ event: messageEnvelope(seed, "tenant-a", resourceId, 1_000 + seed), topic: "evolution.events.v1" });
+async function deliveryContract(publish, source, channel, message) {
+  await publish(); const first = await source.receiveOne(channel); assert.equal(first.message.envelope.id, message.envelope.id); assert.equal(first.message.orderingKey, message.orderingKey);
+  await first.nack(); const second = await source.receiveOne(channel); assert.equal(second.messageId, first.messageId); await second.ack(); return second;
+}
 
 test("command idempotency returns the original outcome and rejects digest conflicts", { skip: !url }, async () => {
   const suffix = `${process.pid}${Date.now()}`.slice(-10); const tenant = `idempotency-${suffix}`;
@@ -173,6 +177,15 @@ test("durable local transport supports at-least-once nack/redelivery and fenced 
   } finally { await database.close(); }
 });
 
+test("shared delivery-source contract passes durable local consumer", { skip: !url }, async () => {
+  const database = new PostgresPersistence(configuration); const transport = new PostgresLocalTransport(database); const source = new PostgresLocalConsumer(transport, "tenant-a"); const envelope = messageEnvelope(11);
+  const message = { envelope, orderingKey: "tenant-a/repo-a/transport-a", attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } };
+  try {
+    await database.tenantTransaction("tenant-a", "READ COMMITTED", (client) => client.query("DELETE FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=$1", [envelope.id]).then(() => undefined));
+    await deliveryContract(() => transport.publish("evolution.events.v1", message), source, "evolution.events.v1", message);
+  } finally { await database.close(); }
+});
+
 test("delayed and reordered delivery cannot violate aggregate version application", { skip: !url }, async () => {
   const database = new PostgresPersistence(configuration); const transport = new PostgresLocalTransport(database);
   const aggregate = `ordered-${process.pid}-${Date.now()}`; const firstEnvelope = messageEnvelope(51, "tenant-a", aggregate, 51); const secondEnvelope = messageEnvelope(52, "tenant-a", aggregate, 52);
@@ -211,9 +224,7 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
     envelope: JSON.parse(new TextDecoder().decode(bytes)), orderingKey, attributes
   }), poisonSink);
   try {
-    const receipt = await publisher.publish(topicName, message); assert.ok(receipt.messageId);
-    const first = await consumer.receiveOne(subscriptionName); assert.equal(first.message.envelope.id, envelope.id); assert.equal(first.message.orderingKey, message.orderingKey); first.nack();
-    const second = await consumer.receiveOne(subscriptionName); assert.equal(second.messageId, first.messageId); await second.ack();
+    await deliveryContract(() => publisher.publish(topicName, message), consumer, subscriptionName, message);
     await topic.createSubscription(poisonSubscription, { ackDeadlineSeconds: 10 });
     await topic.publishMessage({ data: Buffer.from("{malformed"), orderingKey: message.orderingKey,
       attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId, traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", secret: "must-not-propagate" } });
