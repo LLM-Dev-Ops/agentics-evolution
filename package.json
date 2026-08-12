@@ -37,11 +37,14 @@
     "benchmark:foundation": "node scripts/benchmark-foundation.mjs",
     "benchmark:prompt-02": "node scripts/benchmark-prompt-02.mjs",
     "property:prompt-02": "node scripts/property-prompt-02.mjs",
+    "migrate": "node scripts/migrate.mjs",
+    "verify:postgres": "node scripts/verify-postgres.mjs",
     "verify:prompt-02": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run property:prompt-02 && npm run conformance && npm run probe:upstreams && npm run benchmark:foundation && npm run benchmark:prompt-02 && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance:prompt-02 && npm run verify:evidence",
     "verify:prompt-01": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run conformance && npm run probe:upstreams && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance && npm run verify:evidence && npm run verify:reproducibility && npm run benchmark:foundation"
   },
   "dependencies": {
     "@claude-flow/cli": "3.38.0",
+    "@google-cloud/pubsub": "5.3.1",
     "@metaharness/darwin": "0.9.1",
     "@metaharness/flywheel": "0.1.10",
     "@metaharness/harness": "0.2.0",
@@ -53,6 +56,7 @@
     "@metaharness/turn-credit": "0.1.0",
     "claude-flow": "3.38.0",
     "metaharness": "0.4.5",
+    "pg": "8.16.3",
     "ruflo": "3.38.0",
     "ruvector": "0.2.41",
     "uuid": "13.0.0"
@@ -71,6 +75,7 @@
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "6.0.1",
     "@types/node": "20.19.17",
+    "@types/pg": "8.15.5",
     "typescript": "5.9.3",
     "yaml": "2.9.0"
   }
