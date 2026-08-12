@@ -33,16 +33,18 @@ function exactKeys(value, keys, reason) {
 export async function verifyBundle(root, trustedCheckpoint) {
   if (!/^[a-f0-9]{64}$/.test(trustedCheckpoint)) throw new Error("INVALID_TRUST_CHECKPOINT");
   const files = await safeFiles(root); const index = await json(root, "bundle.json");
-  exactKeys(index, ["schema", "manifest", "objects", "receipt", "keyManifest"], "INVALID_BUNDLE_INDEX");
+  exactKeys(index, ["schema", "manifest", "objects", "receipt", "keyManifest", "rvf"], "INVALID_BUNDLE_INDEX");
   if (index.schema !== "agentics.offline-bundle/v1") throw new Error("UNKNOWN_BUNDLE_SCHEMA");
   const keyManifest = await json(root, index.keyManifest.path);
   if (sha256(Buffer.from(canon(keyManifest.payload))) !== trustedCheckpoint) throw new Error("UNTRUSTED_KEY_MANIFEST");
   if (!verifySignature(null, Buffer.from(canon(keyManifest.payload)), createPublicKey(keyManifest.signerPublicKey), Buffer.from(keyManifest.signature, "base64"))) throw new Error("INVALID_KEY_MANIFEST_SIGNATURE");
   const manifest = await json(root, index.manifest.path); const manifestBytes = Buffer.from(canon(manifest.payload));
+  exactKeys(manifest, ["payload", "keyId", "signature"], "INVALID_MANIFEST_ENVELOPE");
   if (sha256(manifestBytes) !== index.manifest.sha256) throw new Error("MANIFEST_DIGEST_MISMATCH");
   const key = keyManifest.payload.keys.find(entry => entry.keyId === manifest.keyId);
   if (!key || key.status === "REVOKED" || !key.purposes.includes("CYCLE_WITNESS")) throw new Error("UNTRUSTED_MANIFEST_KEY");
   if (!verifySignature(null, manifestBytes, createPublicKey(key.publicKeyPem), Buffer.from(manifest.signature, "base64"))) throw new Error("INVALID_MANIFEST_SIGNATURE");
+  if (!Array.isArray(index.objects) || new Set(index.objects.map(entry => entry.sha256)).size !== index.objects.length) throw new Error("DUPLICATE_BUNDLE_OBJECT");
   const objectRefs = new Map(index.objects.map(entry => [entry.sha256, entry]));
   const ordered = [manifest.payload.artifact, ...manifest.payload.dependencies.map(entry => entry.digest)];
   for (const reference of ordered) {
@@ -50,7 +52,23 @@ export async function verifyBundle(root, trustedCheckpoint) {
     const bytes = await readFile(join(root, entry.path)); if (bytes.length !== entry.size || sha256(bytes) !== reference.sha256) throw new Error("OBJECT_INTEGRITY_FAILURE");
   }
   const receipt = await json(root, index.receipt.path); if (!verifyReceipt(receipt)) throw new Error("INVALID_FLYWHEEL_RECEIPT");
-  const declared = new Set(["bundle.json", index.manifest.path, index.receipt.path, index.keyManifest.path, ...index.objects.map(entry => entry.path)]);
+  exactKeys(receipt.payload, ["manifestDigest", "artifactDigests", "gateFingerprint"], "INVALID_RECEIPT_BINDING");
+  if (receipt.payload.manifestDigest !== index.manifest.sha256 || !Array.isArray(receipt.payload.artifactDigests) ||
+      canon(receipt.payload.artifactDigests) !== canon(ordered.map(reference => reference.sha256)) ||
+      !/^sha256:[a-f0-9]{64}$/.test(receipt.payload.gateFingerprint)) throw new Error("INVALID_RECEIPT_BINDING");
+  const rvfFiles = [];
+  if (manifest.payload.rvfWitness !== null && manifest.payload.rvfWitness !== undefined) {
+    if (!index.rvf) throw new Error("MISSING_RVF_BUNDLE");
+    exactKeys(index.rvf, ["path", "identityMapPath", "orderedContent"], "INVALID_RVF_BUNDLE");
+    const rvfBytes = await readFile(join(root, index.rvf.path)); const identityMapBytes = await readFile(join(root, index.rvf.identityMapPath));
+    if (sha256(rvfBytes) !== manifest.payload.rvfWitness.rvfDigest.sha256) throw new Error("RVF_WITNESS_MISMATCH");
+    const contentSet = Buffer.from(canon({ rvfSha256: sha256(rvfBytes), identityMapSha256: sha256(identityMapBytes),
+      orderedContent: index.rvf.orderedContent }));
+    if (sha256(contentSet) !== manifest.payload.rvfWitness.contentSetDigest.sha256 || manifest.payload.rvfWitness.format !== "ruvector-rvf")
+      throw new Error("RVF_WITNESS_MISMATCH");
+    rvfFiles.push(index.rvf.path, index.rvf.identityMapPath);
+  } else if (index.rvf !== null) throw new Error("UNBOUND_RVF_BUNDLE");
+  const declared = new Set(["bundle.json", index.manifest.path, index.receipt.path, index.keyManifest.path, ...index.objects.map(entry => entry.path), ...rvfFiles]);
   if (files.some(file => !declared.has(file)) || files.length !== declared.size) throw new Error("UNDECLARED_BUNDLE_FILE");
   return { schema: "agentics.offline-verification-report/v1", valid: true, manifestSha256: index.manifest.sha256, objectCount: ordered.length, keyManifestCheckpoint: trustedCheckpoint };
 }
