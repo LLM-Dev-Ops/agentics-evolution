@@ -10,6 +10,9 @@ function migrate(databaseUrl, extraEnv = {}) {
     cwd: process.cwd(), env: { ...process.env, DATABASE_URL: databaseUrl, ...extraEnv }, encoding: "utf8"
   });
 }
+function app(databaseUrl, script, mode, aggregateId) {
+  return spawnSync(process.execPath, [script, mode, aggregateId], { cwd: process.cwd(), env: { ...process.env, TEST_DATABASE_URL: databaseUrl }, encoding: "utf8" });
+}
 
 async function interruptAfterSql(databaseUrl, version) {
   const child = spawn(process.execPath, ["scripts/migrate.mjs"], { cwd: process.cwd(),
@@ -59,12 +62,12 @@ test("expanded schema permits mixed old and new writers over a production-shaped
       await database.query(`INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state)
         SELECT 'mixed','repo','aggregate-'||number,'old-writer',1,jsonb_build_object('generation','old') FROM generate_series(1,10000) number`);
       const expanded = migrate(databaseUrl.toString()); assert.equal(expanded.status, 0, expanded.stderr);
-      await Promise.all([
-        database.query("INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state) VALUES('mixed','repo','old-live','old-writer',1,'{}')"),
-        database.query("INSERT INTO local_transport_messages(tenant_id,message_id,event_id,topic,ordering_key,envelope,attributes) VALUES('mixed','0198a41d-2c00-7000-8000-000000009001','0198a41d-2c00-7000-8000-000000009002','evolution.events.v1','mixed/repo/new-live','{}','{}')")
-      ]);
-      assert.equal((await database.query("SELECT count(*)::int AS count FROM aggregates WHERE tenant_id='mixed'")).rows[0].count, 10001);
-      assert.equal((await database.query("SELECT count(*)::int AS count FROM local_transport_messages WHERE tenant_id='mixed'")).rows[0].count, 1);
+      const predecessor = "test/fixtures/predecessor-v3-app.mjs"; const current = "test/fixtures/current-v8-app.mjs";
+      const [oldWrite, newWrite] = [app(databaseUrl.toString(), predecessor, "write", "old-live"), app(databaseUrl.toString(), current, "write", "new-live")];
+      assert.equal(oldWrite.status, 0, oldWrite.stderr); assert.equal(newWrite.status, 0, newWrite.stderr);
+      const [oldReadsNew, newReadsOld] = [app(databaseUrl.toString(), predecessor, "read", "new-live"), app(databaseUrl.toString(), current, "read", "old-live")];
+      assert.equal(oldReadsNew.status, 0, oldReadsNew.stderr); assert.equal(newReadsOld.status, 0, newReadsOld.stderr);
+      assert.equal((await database.query("SELECT count(*)::int AS count FROM aggregates WHERE tenant_id='mixed'")).rows[0].count, 10002);
     } finally { await database.end(); }
   } finally {
     await admin.query("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname=$1", [databaseName]); await admin.query(`DROP DATABASE IF EXISTS ${databaseName}`); await admin.end();
