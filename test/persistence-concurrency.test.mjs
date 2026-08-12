@@ -206,10 +206,10 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
   await topic.createSubscription(subscriptionName, { ackDeadlineSeconds: 10 }); await deadLetterTopic.createSubscription(deadLetterSubscription, { ackDeadlineSeconds: 10 });
   const envelope = messageEnvelope(41); const message = { envelope, orderingKey: "tenant-a/repo-a/transport-a",
     attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } };
-  const publisher = new GooglePubSubTransport(client);
+  const publisher = new GooglePubSubTransport(client); const poisonSink = new GooglePubSubPoisonSink(client);
   const consumer = new GooglePubSubConsumer(client, (bytes, attributes, orderingKey) => ({
     envelope: JSON.parse(new TextDecoder().decode(bytes)), orderingKey, attributes
-  }), new GooglePubSubPoisonSink(client));
+  }), poisonSink);
   try {
     const receipt = await publisher.publish(topicName, message); assert.ok(receipt.messageId);
     const first = await consumer.receiveOne(subscriptionName); assert.equal(first.message.envelope.id, envelope.id); assert.equal(first.message.orderingKey, message.orderingKey); first.nack();
@@ -230,6 +230,12 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
     assert.equal(poison.reason, "MALFORMED_ENVELOPE"); assert.equal(poison.attributes.correlationId, envelope.correlationId);
     assert.equal(poison.attributes.traceparent, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"); assert.equal("secret" in poison.attributes, false);
     assert.equal(Buffer.from(poison.payloadBase64, "base64").toString("utf8"), "{malformed");
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519"); const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
+    const redriveStatement = { schema: "agentics.replay-capability/v1", replayId: `redrive-${poison.messageId}`, issuer: "governance", tenantId: "tenant-a",
+      repositoryId: "repo-a", eventTypes: ["PoisonMessage"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId: poison.messageId, sourceTopic: topicName };
+    const redriveBytes = new TextEncoder().encode(canonicalJson(redriveStatement)); const redriveCapability = verifier.verify(redriveBytes, sign(null, redriveBytes, privateKey));
+    assert.ok(await poisonSink.redrive(poison, topicName, redriveCapability));
+    await assert.rejects(poisonSink.redrive({ ...poison, payloadBase64: Buffer.from("tampered").toString("base64") }, topicName, redriveCapability), /POISON_PAYLOAD_DIGEST_MISMATCH/);
   } finally {
     await client.subscription(subscriptionName).delete().catch(() => undefined); await client.subscription(poisonSubscription).delete().catch(() => undefined);
     await client.subscription(deadLetterSubscription).delete().catch(() => undefined);
