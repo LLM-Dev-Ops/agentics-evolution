@@ -51,7 +51,7 @@ test("PostgreSQL lineage seals dependencies, audits holds and fences garbage col
   let holdAction = "PLACE"; let nonce = 0; const holdVerifier = { verify: async () => ({ tenantId: tenant, manifestDigest: orphan?.manifestDigest.sha256 ?? "", action: holdAction,
     actor: "governance", expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: `hold-${++nonce}` }) };
   const lineage = new ArtifactLineageStore(database, cas, access, holdVerifier); let orphan; const create = async (label, dependencies = []) => {
-    const bytes = new TextEncoder().encode(label); const artifact = reference(bytes); const staged = await cas.stage(bytes, artifact, metadata(tenant)); await cas.finalize(staged);
+    const bytes = new TextEncoder().encode(`${tenant}:${label}`); const artifact = reference(bytes); const staged = await cas.stage(bytes, artifact, metadata(tenant)); await cas.finalize(staged);
     const payload = { schema: "agentics.artifact-manifest/v1", tenantId: tenant, repositoryId: repositoryId("repo-a"), artifact,
       mediaType: "application/octet-stream", size: bytes.byteLength, producer: actorId("producer-a"), source: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
       dependencies, classification: "CONFIDENTIAL", retention: "OPERATIONAL_SCRATCH", createdAt: "2020-01-01T00:00:00.000Z", rvfWitness: null };
