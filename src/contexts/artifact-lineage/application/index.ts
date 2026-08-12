@@ -3,3 +3,4 @@ export interface ArtifactLineageApplicationPort {
 }
 export * from "./cas-port.js";
 export * from "./signing-port.js";
+export * from "./rvf-witness-port.js";
