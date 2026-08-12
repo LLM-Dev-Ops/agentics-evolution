@@ -17,6 +17,19 @@ jobs:
         run: test "$(node --version)" = "v20.19.5" && test "$(npm --version)" = "10.9.4"
       - name: Install complete capability-test graph
         run: npm ci --ignore-scripts
+      - name: Create independently anchored CI evidence identity
+        shell: bash
+        run: |
+          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/evidence-private.pem"
+          openssl pkey -in "$RUNNER_TEMP/evidence-private.pem" -pubout -out "$RUNNER_TEMP/evidence-public.pem"
+          {
+            echo 'AGENTICS_RELEASE_PRIVATE_KEY<<PRIVATE_EOF'
+            cat "$RUNNER_TEMP/evidence-private.pem"
+            echo 'PRIVATE_EOF'
+            echo 'AGENTICS_RELEASE_PUBLIC_KEY<<PUBLIC_EOF'
+            cat "$RUNNER_TEMP/evidence-public.pem"
+            echo 'PUBLIC_EOF'
+          } >> "$GITHUB_ENV"
       - run: npm run verify:prompt-01
       - uses: actions/upload-artifact@v4
         if: always()
