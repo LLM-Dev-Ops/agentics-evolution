@@ -101,6 +101,8 @@ for (const file of allFiles) {
   const lines = text === "" ? 0 : text.split(/\r?\n/).length;
   if (lines > policy.maxLines) errors.push(`${location}: ${lines} lines exceeds ${policy.maxLines}`);
   if (sourceExtensions.has(extension(file))) inspectSource(file, text);
+  if (location.startsWith(".github/workflows/") && /uses:\s*[^\s@]+@(?!(?:[a-f0-9]{40})(?:\s|$))[^\s]+/i.test(text))
+    errors.push(`${location}: GitHub Actions must use immutable 40-character commit SHAs`);
 }
 const catalogPackages = new Set(catalog.authorities.map((entry) => entry.package));
 for (const item of catalog.hosts ?? []) catalogPackages.add(item.package);

@@ -139,6 +139,16 @@ test("rejects missing and malformed required algorithm-family evidence", async (
   assert.match(result.stderr, /required algorithm family 'flywheel-gate' has no structural fingerprints/);
 });
 
+test("rejects mutable GitHub Action tags", async () => {
+  const root = await fixture("export {};\n", "src/example.ts");
+  const workflow = join(root, ".github", "workflows");
+  await mkdir(workflow, { recursive: true });
+  await writeFile(join(workflow, "verify.yml"), "jobs:\n  test:\n    steps:\n      - uses: actions/checkout@v4\n");
+  const result = check(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /immutable 40-character commit SHAs/);
+});
+
 for (const [name, sourcePath, source, message] of [
   ["domain-to-application", "src/domain/model.ts", "export { port } from '../application/port.js';\n", /domain cannot import application or infrastructure/],
   ["domain-to-infrastructure", "src/domain/model.ts", "import '../infrastructure/db.js';\n", /domain cannot import application or infrastructure/],
