@@ -7,6 +7,7 @@ const controls=[
  ["ADR-006.APPROVAL","governance-postgres-live.test.mjs","live PG authorization bounds 100 concurrent consumers and isolates tenants"],
  ["ADR-006.IDENTITY","governance-identity-privacy.test.mjs","cryptographic OIDC verifies human MFA and server-side service mappings"],
  ["ADR-010.GOOGLE_IDENTITY","oidc-rs256.test.mjs","Google RS256 service tokens require exact server mapping"],
+ ["ADR-020.DELETION_AUTHORITY","deletion-authorization.test.mjs","pinned signed deletion approval is exact, opaque, expiring and single-use"],
  ["ADR-006.BUDGET","budget-saga-live.test.mjs","ledger.reserve.behavior: 100 distinct saga IDs share the real authoritative organization ceiling"],
  ["ADR-020.PRIVACY","governance-privacy-scanner.test.mjs","credential and PII corpus is prohibited or redacted without raw persistence material"],
  ["ADR-020.DELETION","governance-deletion-postgres.test.mjs","live PG tombstone blocks writes and deletion resumes idempotently to a signed receipt"],
