@@ -3,6 +3,7 @@ const controls = [
   ["ADR-014.CAS", "artifact-lineage.test.mjs", "immutable staged CAS and scoped reads"],
   ["ADR-014.GCS", "gcs-cas-contract.test.mjs", "streaming stage, immutable generation-fenced copy, scoped access and bucket readiness"],
   ["ADR-014.LINEAGE", "artifact-lineage.test.mjs", "ordered sealed dependencies and fenced GC"],
+  ["ADR-014.GC", "artifact-postgres-live.test.mjs", "live cross-tenant references, holds, fenced deletion and stale-intent reconciliation"],
   ["ADR-019.KEYS", "key-lifecycle.test.mjs", "purpose keys rotate, retire, revoke and fail closed"],
   ["ADR-019.KMS", "trusted-sealing.test.mjs", "exact Ed25519 key version and returned signature verified without fallback"],
   ["ADR-014.SEAL", "trusted-sealing.test.mjs", "trusted active key, digest, audit and outbox are atomic"],
