@@ -1,8 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { generateKeyPairSync, sign } from "node:crypto";
 import pg from "pg";
-import { consumeOnce, OutboxRelay, PostgresPersistence } from "../dist/index.js";
+import { canonicalJson, consumeOnce, OutboxRelay, PostgresPersistence, ReplayCapabilityVerifier } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
 const worker = new URL("fixtures/postgres-crash-worker.mjs", import.meta.url).pathname;
@@ -80,8 +81,12 @@ test("terminal publish failure is attributable and requires authorization to red
     const dead = await database.pool.query("SELECT reason_code,source_topic,repository_id,aggregate_id,attempts,redrive_count FROM dead_letters WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
     assert.equal(dead.rowCount, 1); assert.deepEqual(dead.rows[0], { reason_code: "PUBLISH_EXHAUSTED", source_topic: "evolution.events.v1",
       repository_id: "repo-crash", aggregate_id: "aggregate-crash", attempts: 1, redrive_count: 0 });
-    await assert.rejects(failing.redrive(tenant, eventId, false), /REDRIVE_AUTHORIZATION_REQUIRED/);
-    await failing.redrive(tenant, eventId, true);
+    await assert.rejects(failing.redrive(tenant, eventId, {}), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
+    const { privateKey, publicKey } = generateKeyPairSync("ed25519"); const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
+    const statement = { schema: "agentics.replay-capability/v1", replayId: `redrive-${eventId}`, issuer: "governance", tenantId: tenant,
+      repositoryId: "repo-crash", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString() };
+    const bytes = new TextEncoder().encode(canonicalJson(statement)); const capability = verifier.verify(bytes, sign(null, bytes, privateKey));
+    await failing.redrive(tenant, eventId, capability);
     const successful = new OutboxRelay(database, { publish: async () => ({ messageId: "broker-redrive" }) });
     assert.equal(await successful.drain(tenant), 1);
     const audited = await database.pool.query("SELECT redrive_count,redriven_at FROM dead_letters WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
