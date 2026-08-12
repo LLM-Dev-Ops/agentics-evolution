@@ -9,6 +9,7 @@ const required = [
   "reports/license-report.json",
   "reports/native-inventory.json",
   "reports/audit-production.json",
+  "reports/audit-platform.json",
   "reports/tests.tap.txt"
 ];
 const subjects = [];

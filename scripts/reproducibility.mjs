@@ -25,7 +25,8 @@ async function cleanRun(parent, iteration) {
   const archive = execFileSync("git", ["archive", "--format=tar", "HEAD"], { maxBuffer: 50 * 1024 * 1024 });
   execFileSync("tar", ["-xf", "-", "-C", root], { input: archive });
   const options = { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] };
-  execFileSync("npm", ["ci", "--include=optional", "--ignore-scripts"], options);
+  execFileSync("npm", ["ci", "--omit=optional", "--ignore-scripts"], options);
+  execFileSync("npm", ["run", "install:platform-artifacts"], options);
   execFileSync("npm", ["run", "build"], options);
   execFileSync("npm", ["test"], options);
   const outputs = await files(root);

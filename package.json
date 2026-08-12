@@ -20,6 +20,7 @@
     "test:evidence": "node scripts/test-evidence.mjs",
     "conformance": "node scripts/conformance.mjs",
     "probe:upstreams": "node scripts/probe-upstreams.mjs",
+    "install:platform-artifacts": "node scripts/install-platform-artifacts.mjs",
     "evidence:supply-chain": "node scripts/supply-chain.mjs",
     "build:brain-local": "node scripts/build-brain-local.mjs",
     "verify:brain-local": "node scripts/verify-brain-local.mjs",
@@ -47,14 +48,16 @@
     "ruflo": "3.38.0",
     "ruvector": "0.2.41"
   },
-  "optionalDependencies": {
-    "@ruvector/rvf": "0.2.3",
-    "@ruvector/rvf-node-linux-arm64-gnu": "0.2.2",
-    "@ruvector/rvf-node-linux-x64-gnu": "0.2.2",
-    "@ruvector/rvf-solver": "0.1.8",
-    "@ruvector/rvf-wasm": "0.1.9",
-    "ruvector-core-linux-arm64-gnu": "0.1.30",
-    "ruvector-core-linux-x64-gnu": "0.1.30"
+  "agentics": {
+    "platformDependencies": {
+      "@ruvector/rvf": "0.2.3",
+      "@ruvector/rvf-node-linux-arm64-gnu": "0.2.2",
+      "@ruvector/rvf-node-linux-x64-gnu": "0.2.2",
+      "@ruvector/rvf-solver": "0.1.8",
+      "@ruvector/rvf-wasm": "0.1.9",
+      "ruvector-core-linux-arm64-gnu": "0.1.30",
+      "ruvector-core-linux-x64-gnu": "0.1.30"
+    }
   },
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "6.0.1",

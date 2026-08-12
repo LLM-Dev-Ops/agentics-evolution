@@ -14,3 +14,11 @@ export function maintainerPolicyFailures(name, maintainers, policy) {
     return [`${name}: maintainer set drifted from approved identities`];
   return [];
 }
+
+export function vulnerabilityPolicyFailures(name, audit) {
+  const counts = audit?.metadata?.vulnerabilities;
+  if (!counts) return [`${name}: vulnerability audit metadata missing`];
+  if (counts.high > 0 || counts.critical > 0)
+    return [`${name}: ${counts.high} high and ${counts.critical} critical vulnerabilities`];
+  return [];
+}
