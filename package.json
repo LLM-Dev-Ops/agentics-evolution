@@ -9,13 +9,17 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
-  "engines": { "node": ">=20 <21" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20 <21"
+  },
   "packageManager": "npm@10.9.4",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
-    "lint": "node scripts/check-source.mjs",
+    "lint": "node scripts/check-source.mjs && node scripts/check-ddd-boundaries.mjs",
     "test": "node --test test/*.test.mjs",
     "test:evidence": "NODE_PATH=.agentics-platform/node_modules node scripts/test-evidence.mjs",
     "conformance": "node scripts/conformance.mjs",
@@ -30,6 +34,8 @@
     "verify:evidence": "node scripts/verify-evidence.mjs",
     "verify:reproducibility": "node scripts/reproducibility.mjs",
     "benchmark:foundation": "node scripts/benchmark-foundation.mjs",
+    "benchmark:prompt-02": "node scripts/benchmark-prompt-02.mjs",
+    "verify:prompt-02": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run conformance && npm run probe:upstreams && npm run benchmark:foundation && npm run benchmark:prompt-02",
     "verify:prompt-01": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run conformance && npm run probe:upstreams && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance && npm run verify:evidence && npm run verify:reproducibility && npm run benchmark:foundation"
   },
   "dependencies": {
@@ -46,7 +52,8 @@
     "claude-flow": "3.38.0",
     "metaharness": "0.4.5",
     "ruflo": "3.38.0",
-    "ruvector": "0.2.41"
+    "ruvector": "0.2.41",
+    "uuid": "13.0.0"
   },
   "agentics": {
     "platformDependencies": {

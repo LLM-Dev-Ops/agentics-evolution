@@ -18,6 +18,7 @@ authorities:
     upstreamAdrs: [ADR-150, ADR-153, ADR-322, ADR-331, ADR-381]
     contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
+    aclPorts: [RufloCoordinationPort]
   - name: metaharness
     package: metaharness
     version: "0.4.5"
@@ -31,6 +32,7 @@ authorities:
     upstreamAdrs: [ADR-322B]
     contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
+    aclPorts: [HarnessAnalysisPort]
   - name: darwin
     package: "@metaharness/darwin"
     version: "0.9.1"
@@ -44,6 +46,7 @@ authorities:
     upstreamAdrs: [ADR-322B]
     contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
+    aclPorts: [DarwinEvolutionPort]
   - name: flywheel
     package: "@metaharness/flywheel"
     version: "0.1.10"
@@ -57,6 +60,7 @@ authorities:
     upstreamAdrs: [ADR-322C]
     contractTests: [test/upstream-contracts.test.mjs]
     deviations: []
+    aclPorts: [FlywheelProofPort]
   - name: redblue
     package: "@metaharness/redblue"
     version: "0.1.4"
@@ -70,6 +74,7 @@ authorities:
     upstreamAdrs: [ADR-322B]
     contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
+    aclPorts: [RedBluePort]
   - name: turn-credit
     package: "@metaharness/turn-credit"
     version: "0.1.0"
@@ -122,6 +127,7 @@ authorities:
     upstreamAdrs: [ADR-381]
     contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
+    aclPorts: [BrainKnowledgePort]
 sourceAuthorities:
   - name: ruvector-brain-local
     repository: https://github.com/ruvnet/RuVector.git

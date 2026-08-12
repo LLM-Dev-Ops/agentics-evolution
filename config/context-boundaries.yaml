@@ -1,0 +1,18 @@
+schemaVersion: agentics.context-boundaries/v1
+root: src/contexts
+contexts:
+  - observation
+  - dream
+  - evolution
+  - evaluation
+  - governance
+  - operations
+  - brain-knowledge
+  - repository-integration
+  - artifact-lineage
+  - evaluation-corpus
+requiredLayers: [domain, application, infrastructure]
+publicEntrypoint: index.ts
+allowedCrossContextTargets: [published-language, application]
+forbiddenPublicSegments: [infrastructure]
+upstreamPackages: [ruflo, claude-flow, "@claude-flow/cli", metaharness, "@metaharness/darwin", "@metaharness/flywheel", "@metaharness/redblue", "@metaharness/turn-credit", "@metaharness/router", "@metaharness/harness", "@metaharness/kernel", "@metaharness/host-claude-code", "@metaharness/host-codex", ruvector, "@ruvector/rvf"]

@@ -30,7 +30,7 @@ jobs:
             cat "$RUNNER_TEMP/evidence-public.pem"
             echo 'PUBLIC_EOF'
           } >> "$GITHUB_ENV"
-      - run: npm run verify:prompt-01
+      - run: npm run verify:prompt-01 && npm run verify:prompt-02
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
