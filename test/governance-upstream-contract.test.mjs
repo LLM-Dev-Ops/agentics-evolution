@@ -13,8 +13,8 @@ const CAPABILITY_TEST_IDS = ["policy.evaluate.behavior", "policy.deny.behavior",
 assert.equal(CAPABILITY_TEST_IDS.length, 10);
 const pins = [
   ["policy-engine", "c44b699eadc6b8dbbd26fa35d7cf82d61275979b"],
-  ["agentics-enforcement", "90f1b063606d1bb0f53d77a712ad71cf7870c9ff"],
-  ["agentics-usage-ledger", "4ab9d188cf566bba54acaa997e3df221ed4656a8"]
+  ["agentics-enforcement", "b934c6345b2620acbdc76aebcfd2a9c80e6674bf"],
+  ["agentics-usage-ledger", "dbd63a6ae35a45f889170fc2ca3e611907506c45"]
 ];
 test("policy.evaluate.behavior enforcement.schema.behavior ledger.reserve.behavior: source authorities are exact", async () => {
   for (const [name, commit] of pins) assert.equal((await exec("git", ["-C", `/workspace/agentics-dev/${name}`, "rev-parse", "HEAD"])).stdout.trim(), commit);

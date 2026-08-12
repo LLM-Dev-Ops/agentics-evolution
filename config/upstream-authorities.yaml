@@ -129,6 +129,18 @@ authorities:
     deviations: []
     aclPorts: [BrainKnowledgePort]
 sourceAuthorities:
+  - name: agentics-contracts
+    repository: https://github.com/LLM-Dev-Ops/agentics-contracts.git
+    commit: 716a33348721f78a7a14bd98e6717e3b40470730
+    sourceTree: 2ff8e46209e9b5594a20cbfe80b0552a91987ab4
+    path: .
+    build: npm ci --ignore-scripts && npm run build
+    binary: index.js
+    owner: platform-governance
+    requiredCapabilities: [canonical-schemas, esm-interop]
+    capabilityTests: { canonical-schemas: contracts.schemas.behavior, esm-interop: contracts.esm.behavior }
+    contractTests: [test/governance-source-build.test.mjs]
+    deviations: []
   - name: agentics-policy-engine
     repository: https://github.com/LLM-Dev-Ops/policy-engine.git
     commit: c44b699eadc6b8dbbd26fa35d7cf82d61275979b
@@ -143,8 +155,8 @@ sourceAuthorities:
     deviations: []
   - name: agentics-enforcement
     repository: https://github.com/LLM-Dev-Ops/agentics-enforcement.git
-    commit: 90f1b063606d1bb0f53d77a712ad71cf7870c9ff
-    sourceTree: 6096b6d98189fc32259fe9a844924c7c7215fb75
+    commit: b934c6345b2620acbdc76aebcfd2a9c80e6674bf
+    sourceTree: 6d7d9f432079d68529000b7cd0fd0fe74010d8a5
     path: .
     build: npm ci --ignore-scripts && npm run build
     binary: dist/index.js

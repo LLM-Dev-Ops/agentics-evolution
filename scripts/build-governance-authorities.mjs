@@ -7,7 +7,7 @@ import { loadAuthorityCatalog } from "./authority-catalog.mjs";
 
 const exec = promisify(execFile); const { catalog, failures } = await loadAuthorityCatalog();
 if (failures.length) throw new Error(failures.join("\n"));
-const names = new Set(["agentics-policy-engine", "agentics-enforcement", "agentics-usage-ledger"]);
+const names = new Set(["agentics-contracts", "agentics-policy-engine", "agentics-enforcement", "agentics-usage-ledger"]);
 const sources = catalog.sourceAuthorities.filter(({ name }) => names.has(name));
 if (sources.length !== names.size) throw new Error("governance source authority catalog incomplete");
 const root = resolve(process.env.AGENTICS_UPSTREAM_CACHE ?? join(homedir(), ".cache", "agentics-evolution", "upstreams")); await mkdir(root, { recursive: true });
