@@ -16,7 +16,7 @@ const required = [
 ];
 const subjects = [];
 for (const path of required) subjects.push({ path, sha256: sha256(await readFile(path)) });
-for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-boundaries.json"]) {
+for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-boundaries.json", "reports/prompt-02-properties.json"]) {
   if (await access(path).then(() => true, () => false)) subjects.push({ path, sha256: sha256(await readFile(path)) });
 }
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();

@@ -4,6 +4,7 @@ import { SourceSnapshot, sourceSnapshot } from "./source-snapshot.js";
 import { UtcInstant, utcInstant } from "./time.js";
 import { CausationId, CorrelationId, EventId, IdempotencyKey, causationId, correlationId, eventId, idempotencyKey } from "./uuid-v7.js";
 import { canonicalJson, deepFreeze } from "./immutable.js";
+import type { EnvelopeSchemaRegistry } from "./schema-registry.js";
 export const ENVELOPE_SCHEMA = "agentics.evolution-envelope/v1" as const;
 export interface EvolutionEnvelope<P extends Record<string, unknown> = Record<string, unknown>> {
   readonly envelopeSchema: typeof ENVELOPE_SCHEMA; readonly schemaVersion: 1; readonly id: EventId; readonly type: string;
@@ -40,3 +41,13 @@ export function createEnvelope<P extends Record<string, unknown>>(input: Evoluti
 }
 export const encodeEnvelope = (value: EvolutionEnvelope): Uint8Array => new TextEncoder().encode(canonicalJson(value));
 export const envelopeDigest = (value: EvolutionEnvelope) => digestBytes(encodeEnvelope(value));
+export function decodeEnvelope(bytes: Uint8Array, registry: EnvelopeSchemaRegistry): Readonly<EvolutionEnvelope> {
+  if (bytes.byteLength > 1_048_576) throw new TypeError("envelope exceeds one MiB");
+  let parsed: unknown;
+  try { parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+  catch { throw new TypeError("INVALID_ENVELOPE_JSON"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("INVALID_ENVELOPE_OBJECT");
+  const envelope = createEnvelope(parsed as EvolutionEnvelope);
+  registry.validate(envelope);
+  return envelope;
+}

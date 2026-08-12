@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { generateKeyPairSync, sign, verify } from "node:crypto";
 import {
-  actorId, aggregateId, authorizeServing, causationId, correlationId, createEnvelope, cycleId, digestBytes, digestReference,
+  actorId, aggregateId, authorizeServing, causationId, correlationId, createEnvelope, cycleId, decodeEnvelope, digestBytes, digestReference,
   emptyTrustAggregate, encodeEnvelope, EnvelopeSchemaRegistry, eventId, idempotencyKey, money,
   moneyFromWire, moneyToWire, newCausationId, newCorrelationId, newEventId, newIdempotencyKey,
   replayTrust, repositoryId, sourceSnapshot, tenantId, transitionTrust, utcInstant
@@ -94,6 +94,8 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
   const registry = new EnvelopeSchemaRegistry();
   registry.register("HypothesisProposed", 1, (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); });
   registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, () => {}), /already/);
+  assert.deepEqual(decodeEnvelope(encodeEnvelope(value), registry), value);
+  assert.throws(() => decodeEnvelope(new TextEncoder().encode("not json"), registry), /INVALID_ENVELOPE_JSON/);
   assert.throws(() => registry.validate(envelope("CandidateGenerated", 1)), /UNKNOWN_SCHEMA_VERSION/);
   assert.throws(() => envelope("HypothesisProposed", 0, { payload: { tenantId: "tenant-b", authority: "Dream" } }), /cross-tenant/);
   assert.throws(() => envelope("HypothesisProposed", 0, { payload: { repositoryId: "repo-b", authority: "Dream" } }), /cross-repository/);
