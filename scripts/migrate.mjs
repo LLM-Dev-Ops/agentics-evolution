@@ -8,7 +8,9 @@ if (!connectionString) throw new Error("DATABASE_URL is required for release-job
 const client = new Client({ connectionString }); await client.connect();
 try {
   await client.query("SELECT pg_advisory_lock(719307130031::bigint)");
-  const migrations = (await readdir("migrations")).filter((file) => /^\d+_.*\.sql$/.test(file)).sort();
+  const maximumVersion = process.env.AGENTICS_MIGRATION_MAX_VERSION ? Number(process.env.AGENTICS_MIGRATION_MAX_VERSION) : Number.MAX_SAFE_INTEGER;
+  if (!Number.isSafeInteger(maximumVersion) || maximumVersion < 0) throw new Error("invalid AGENTICS_MIGRATION_MAX_VERSION");
+  const migrations = (await readdir("migrations")).filter((file) => /^\d+_.*\.sql$/.test(file) && Number(file.split("_")[0]) <= maximumVersion).sort();
   for (const file of migrations) {
     const sql = await readFile(`migrations/${file}`, "utf8");
     const version = Number(file.split("_")[0]);
