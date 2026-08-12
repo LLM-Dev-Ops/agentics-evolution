@@ -20,7 +20,7 @@ test("live PG tombstone blocks writes and deletion resumes idempotently to a sig
   const tombstone = deletionTombstone({ tenantId: tenant, repositoryId: repo, requestId: `delete-${suffix}`, requestedAt: "2027-01-01T00:00:00Z", policyEpoch: 1 });
   try {
     await workflow.assertWritesAllowed(tenant, repo); await workflow.request(tombstone); await assert.rejects(workflow.assertWritesAllowed(tenant, repo), /TOMBSTONED/);
-    await workflow.request(tombstone); const [first, concurrent] = await Promise.all([workflow.resume(tombstone),workflow.resume(tombstone)]); assert.deepEqual(concurrent,first); const second = await workflow.resume(tombstone); assert.deepEqual(second, first);
+    await workflow.request(tombstone); const concurrent = await Promise.all(Array.from({length:100},()=>workflow.resume(tombstone))); const first=concurrent[0]; for(const receipt of concurrent)assert.deepEqual(receipt,first); const second = await workflow.resume(tombstone); assert.deepEqual(second, first);
     for (const category of categories) assert.ok(calls.get(category) >= 1); assert.equal(first.payload.results.length, 7);
     assert.equal(new Ed25519DeletionReceiptVerifier({ "delete/1": pair.publicKey.export({ type: "spki", format: "pem" }) }).verify(first), true);
     await assert.rejects(workflow.request({ ...tombstone, requestId: `conflict-${suffix}` }), /TOMBSTONE_CONFLICT/);
