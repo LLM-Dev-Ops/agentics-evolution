@@ -1,6 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { resolve, relative, join, dirname, sep } from "node:path";
 import process from "node:process";
+import { createHash } from "node:crypto";
 import ts from "typescript";
 import { parse } from "yaml";
 
@@ -56,6 +57,24 @@ function inspectSource(file, text) {
   const location = rel(file);
   const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : file.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
   const ast = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
+  const fingerprinted = new Set();
+  const normalizeNode = (node) => {
+    if (ts.isIdentifier(node)) return "Identifier";
+    if (ts.isStringLiteral(node) || ts.isNumericLiteral(node) ||
+        node.kind === ts.SyntaxKind.TrueKeyword || node.kind === ts.SyntaxKind.FalseKeyword)
+      return ts.SyntaxKind[node.kind];
+    return `${ts.SyntaxKind[node.kind]}(${node.getChildren(ast).map(normalizeNode).join(",")})`;
+  };
+  const inspectFingerprint = (node) => {
+    if (!node.body || fingerprinted.has(node)) return;
+    fingerprinted.add(node);
+    const parameters = node.parameters?.map((parameter) => normalizeNode(parameter)).join(",") ?? "";
+    const shape = `params(${parameters})body(${normalizeNode(node.body)})`;
+    const digest = createHash("sha256").update(shape).digest("hex");
+    for (const [family, fingerprints] of Object.entries(policy.algorithmFingerprints ?? {})) {
+      if (fingerprints.includes(digest)) errors.push(`${location}: structurally duplicates upstream-owned ${family} algorithm (${digest})`);
+    }
+  };
   const visit = (node) => {
     if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier))
       { inspectModuleReference(file, node.moduleSpecifier.text); inspectLayerReference(file, node.moduleSpecifier.text); }
@@ -67,6 +86,8 @@ function inspectSource(file, text) {
       errors.push(`${location}: duplicates upstream-owned algorithm symbol '${node.name.text}'`);
     if (ts.isClassDeclaration(node) && node.name && policy.forbiddenAlgorithmSymbols.includes(node.name.text))
       errors.push(`${location}: duplicates upstream-owned algorithm symbol '${node.name.text}'`);
+    if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+      inspectFingerprint(node);
     ts.forEachChild(node, visit);
   };
   visit(ast);
@@ -92,6 +113,14 @@ for (const authority of catalog.authorities) {
   const expected = policy.allowedUpstreamAdapters[authority.package];
   if (expected !== `src/${authority.adapter}`)
     errors.push(`${authority.package}: catalog adapter '${authority.adapter}' disagrees with source policy '${expected ?? "missing"}'`);
+}
+for (const family of policy.requiredAlgorithmFamilies ?? []) {
+  const fingerprints = policy.algorithmFingerprints?.[family];
+  if (!Array.isArray(fingerprints) || fingerprints.length === 0)
+    errors.push(`source-policy: required algorithm family '${family}' has no structural fingerprints`);
+  for (const fingerprint of fingerprints ?? []) {
+    if (!/^[a-f0-9]{64}$/.test(fingerprint)) errors.push(`source-policy: ${family} has invalid SHA-256 fingerprint '${fingerprint}'`);
+  }
 }
 const manifestFile = allFiles.find((file) => rel(file) === "package.json");
 if (manifestFile) {
