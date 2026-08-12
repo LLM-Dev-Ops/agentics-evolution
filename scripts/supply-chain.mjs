@@ -103,6 +103,7 @@ const architecture = process.arch === "x64" ? "x64" : process.arch === "arm64" ?
 if (process.platform !== "linux" || !architecture) failures.push(`unsupported production platform ${process.platform}-${process.arch}`);
 const selectedArtifacts = (catalog.platformArtifacts ?? []).filter(({ platform }) => platform === "any" || platform === `linux-${architecture}-gnu`);
 let platformAudit = { error: "platform audit unavailable" };
+let platformInventory = [];
 if (architecture) {
   const directory = await mkdtemp(join(tmpdir(), "agentics-platform-audit-"));
   try {
@@ -115,6 +116,13 @@ if (architecture) {
     await writeFile(join(directory, "package.json"), `${JSON.stringify(selectedManifest, null, 2)}\n`);
     execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts", "--omit=optional"], { cwd: directory, stdio: "pipe" });
     const selectedLock = JSON.parse(await readFile(join(directory, "package-lock.json"), "utf8"));
+    platformInventory = Object.entries(selectedLock.packages ?? {})
+      .filter(([path]) => path.startsWith("node_modules/"))
+      .map(([path, entry]) => ({
+        name: path.slice("node_modules/".length), version: entry.version, integrity: entry.integrity,
+        license: entry.license ?? "UNKNOWN", native: Boolean(entry.cpu || entry.os || entry.libc || entry.hasInstallScript)
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name));
     for (const artifact of selectedArtifacts) {
       const resolved = selectedLock.packages?.[`node_modules/${artifact.package}`];
       if (resolved?.version !== artifact.version || resolved?.integrity !== artifact.integrity)
@@ -138,7 +146,7 @@ await Promise.all([
   writeFile("reports/license-report.json", `${JSON.stringify({ schemaVersion: "agentics.licenses/v1", ...common, packages: licenses }, null, 2)}\n`),
   writeFile("reports/native-inventory.json", `${JSON.stringify({ schemaVersion: "agentics.native-inventory/v1", ...common, packages: native }, null, 2)}\n`),
   writeFile("reports/audit-production.json", `${JSON.stringify(audit ?? { error: "audit unavailable" }, null, 2)}\n`),
-  writeFile("reports/audit-platform.json", `${JSON.stringify({ platform: `${process.platform}-${process.arch}`, selectedArtifacts, audit: platformAudit }, null, 2)}\n`)
+  writeFile("reports/audit-platform.json", `${JSON.stringify({ platform: `${process.platform}-${process.arch}`, selectedArtifacts, inventory: platformInventory, audit: platformAudit }, null, 2)}\n`)
 ]);
 if (failures.length) {
   console.error(failures.join("\n"));

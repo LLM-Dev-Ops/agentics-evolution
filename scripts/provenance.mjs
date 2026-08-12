@@ -10,6 +10,8 @@ const required = [
   "reports/native-inventory.json",
   "reports/audit-production.json",
   "reports/audit-platform.json",
+  "reports/sbom-base.cdx.json",
+  "reports/sbom-platform.cdx.json",
   "reports/tests.tap.txt"
 ];
 const subjects = [];

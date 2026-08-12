@@ -68,4 +68,4 @@ jobs:
       - run: npm ci --omit=optional --ignore-scripts && npm run install:platform-artifacts
       - run: npm run lint && npm run typecheck && npm run build
       - name: Verify arm64 native capability selection
-        run: node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"
+        run: NODE_PATH=.agentics-platform/node_modules node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"

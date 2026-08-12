@@ -2,8 +2,8 @@
   "schemaVersion": "agentics.platform-artifacts-lock/v1",
   "packages": {
     "@ruvector/rvf": { "version": "0.2.3", "integrity": "sha512-Z3TGxErAa9254UTB8COt44sXU3u5CCZWDewwu4Bj3mDoE8vWsaUiXxUBTJRy4sp60ZFXygghWGB8MsX1bs3zZw==" },
-    "@ruvector/rvf-node-linux-arm64-gnu": { "version": "0.2.2", "integrity": "sha512-s+B+slW4R1Vy504MYELEq1CNstZ1mbvc8hirYydJ7qJ4L1y5JwcmOpKsouDb59tmw93e6IDsvjw8wLB1VHkeFQ==" },
-    "@ruvector/rvf-node-linux-x64-gnu": { "version": "0.2.2", "integrity": "sha512-RGIZCsQdBl1ewpnh5QHRirbyOPpkB/193UeG6ch8bnhj3/9vP4NNNn7/TTTw1iiPSFzfcfzZIqxCOxjbue7jOg==" },
+    "@ruvector/rvf-node-linux-arm64-gnu": { "version": "0.1.7", "integrity": "sha512-oZwrtfs7XqRVaDP6iiw6G52l7+NdP3NbTwR2iM+EP8r8X4e1+p4opwV2Ig+lyT7wAz72wcyOpkzpu1MlbK4NKA==" },
+    "@ruvector/rvf-node-linux-x64-gnu": { "version": "0.1.7", "integrity": "sha512-CRq9nc7dIj8QbcY9sSXvVau7cr1ESh3VnYUPp1IodzZ4SegN0H3oeieF5nUMNYyq+43MkBR4yrEwFgDBZ00QHQ==" },
     "@ruvector/rvf-solver": { "version": "0.1.8", "integrity": "sha512-YM7L6TvhVoC5w0kUMl8ASback2ka3MesPvuf+lRYSJEcaf6bncPX7YGzcrsheOe4BBwyiyx39vAijVPx1nZkWA==" },
     "@ruvector/rvf-wasm": { "version": "0.1.9", "integrity": "sha512-C6kKdnv47Ud2t0U61eAjRU8dh9DgfQT6KFlGicZKfwUwVcr9NRA52xbM9hI9nd6G3iEOtNqdhkqDe0c6BUwFew==" },
     "ruvector-core-linux-arm64-gnu": { "version": "0.1.30", "integrity": "sha512-+dLsq9MCv7il60i/7/3BeF3AkT7BGOkCv5P53ljaWBrMdAY1Q0lS75Mb3ze24j2pEcd1tP/X92mHBPjsB6uBGw==" },

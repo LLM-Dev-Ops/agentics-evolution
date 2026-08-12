@@ -1,4 +1,5 @@
 node_modules/
+.agentics-platform/
 dist/
 reports/*.json
 !reports/.gitkeep

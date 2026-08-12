@@ -9,4 +9,6 @@ for (const component of sbom.components) {
   refs.add(component["bom-ref"]);
   if (!component.name || !component.version) throw new Error("SBOM component lacks name or version");
 }
+const platformCount = Number(sbom.metadata?.properties?.find(({ name }) => name === "agentics:platform-component-count")?.value);
+if (!Number.isInteger(platformCount) || platformCount < 1) throw new Error("merged platform SBOM evidence is required");
 console.log(`validated CycloneDX SBOM with ${refs.size} components`);
