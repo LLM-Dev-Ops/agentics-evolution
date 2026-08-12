@@ -29,12 +29,18 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
       const current = await readFile(destination); if (digestBytes(current) !== staged.expected.sha256) throw new TypeError("CAS_COLLISION"); await rm(path, { force: true });
     }
     await rm(path, { force: true });
-    await writeFile(`${destination}.json`, JSON.stringify({ ...staged.metadata, size: staged.size }), { flag: "wx", mode: 0o600 }).catch(async (error: NodeJS.ErrnoException) => { if (error.code !== "EEXIST") throw error; });
+    const metadataPath = `${destination}.json`; const scope = { tenantId: staged.metadata.tenantId, repositoryId: staged.metadata.repositoryId };
+    await writeFile(metadataPath, JSON.stringify({ size: staged.size, scopes: [scope] }), { flag: "wx", mode: 0o600 }).catch(async (error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error; const current = JSON.parse(await readFile(metadataPath, "utf8"));
+      if (!current.scopes.some((item: typeof scope) => item.tenantId === scope.tenantId && item.repositoryId === scope.repositoryId)) {
+        current.scopes.push(scope); await writeFile(metadataPath, JSON.stringify(current), { mode: 0o600 });
+      }
+    });
     await rm(`${path}.json`, { force: true }); return staged.expected;
   }
   async read(reference: DigestReference, grant: ArtifactReadGrant): Promise<Uint8Array> {
     const verified = await this.access.verifyRead(grant); digestReference(reference); const path = this.finalPath(reference); const metadata = JSON.parse(await readFile(`${path}.json`, "utf8"));
-    if (metadata.tenantId !== verified.tenantId || metadata.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND"); const bytes = await readFile(path);
+    if (!metadata.scopes?.some((item: { tenantId: string; repositoryId: string }) => item.tenantId === verified.tenantId && item.repositoryId === verified.repositoryId)) throw new TypeError("ARTIFACT_NOT_FOUND"); const bytes = await readFile(path);
     if (digestBytes(bytes) !== reference.sha256) throw new TypeError("CAS_OBJECT_TAMPERED"); return bytes;
   }
   async exists(reference: DigestReference): Promise<boolean> { return stat(this.finalPath(reference)).then(() => true, () => false); }
@@ -46,7 +52,7 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
     if (metadataText === undefined && !await this.exists(reference)) return;
     if (metadataText === undefined) throw new TypeError("CAS_METADATA_MISSING");
     const metadata = JSON.parse(metadataText);
-    if (metadata.tenantId !== verified.tenantId || metadata.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND");
+    if (!metadata.scopes?.some((item: { tenantId: string; repositoryId: string }) => item.tenantId === verified.tenantId && item.repositoryId === verified.repositoryId)) throw new TypeError("ARTIFACT_NOT_FOUND");
     await rm(this.finalPath(reference)); await rm(`${this.finalPath(reference)}.json`, { force: true });
   }
   private finalPath(reference: DigestReference): string { return join(this.root, "sha256", reference.sha256.slice(0, 2), reference.sha256); }

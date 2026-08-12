@@ -26,22 +26,6 @@ export class ArtifactLineageStore {
       await statusEvent(client, payload.tenantId, manifest.manifestDigest.sha256, 0, "STAGED", "manifest staged", payload.producer);
     });
   }
-  async seal(manifest: ArtifactManifest): Promise<void> {
-    if (manifest.status !== "SEALED" || !manifest.keyId || !manifest.signature) throw new TypeError("SEALED_MANIFEST_REQUIRED"); const payload = manifest.payload;
-    const grant = this.access.issueRead({ tenantId: payload.tenantId, repositoryId: payload.repositoryId, expiresAt: new Date(Date.now() + 60_000).toISOString() });
-    if (!await this.cas.exists(payload.artifact)) throw new TypeError("PRIMARY_ARTIFACT_MISSING"); await this.cas.read(payload.artifact, grant);
-    await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
-      for (const dependency of payload.dependencies) {
-        const row = await client.query(`SELECT status,repository_id FROM artifact_manifests WHERE tenant_id=$1 AND artifact_digest=$2`, [payload.tenantId, dependency.digest.sha256]);
-        if (row.rows[0]?.status !== "SEALED" || row.rows[0].repository_id !== payload.repositoryId) throw new TypeError("DEPENDENCY_NOT_SEALED_OR_SCOPED");
-        if (!await this.cas.exists(dependency.digest)) throw new TypeError("DEPENDENCY_ARTIFACT_MISSING"); await this.cas.read(dependency.digest, grant);
-      }
-      await assertAcyclic(client, payload.tenantId, manifest.manifestDigest.sha256);
-      const result = await client.query(`UPDATE artifact_manifests SET status='SEALED',version=1,key_id=$3,signature=$4,algorithm='ed25519',finalized_at=transaction_timestamp(),updated_at=transaction_timestamp()
-        WHERE tenant_id=$1 AND manifest_digest=$2 AND status='STAGED' AND version=0`, [payload.tenantId, manifest.manifestDigest.sha256, manifest.keyId, manifest.signature]);
-      if (result.rowCount !== 1) throw new TypeError("MANIFEST_SEAL_CONFLICT"); await statusEvent(client, payload.tenantId, manifest.manifestDigest.sha256, 1, "SEALED", "dependencies and signature verified", payload.producer);
-    });
-  }
   async setLegalHold(tenantId: string, manifestDigest: string, held: boolean, authorization: LegalHoldAuthorization): Promise<void> {
     if (!this.holdVerifier) throw new TypeError("LEGAL_HOLD_AUTHORIZATION_VERIFIER_REQUIRED");
     const verified = await this.holdVerifier.verify(authorization); const action = held ? "PLACE" : "RELEASE";
@@ -77,7 +61,7 @@ export class ArtifactLineageStore {
       const intent = await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
       const guarded = await client.query(`SELECT artifact_digest,version,repository_id FROM artifact_manifests WHERE tenant_id=$1 AND manifest_digest=$2 AND version=$3
         AND status IN ('REVOKED','EXPIRED') AND legal_hold=false AND retain_until<$4
-        AND NOT EXISTS (SELECT 1 FROM artifact_digest_references r WHERE r.artifact_digest=artifact_manifests.artifact_digest AND r.live AND r.manifest_digest<>artifact_manifests.manifest_digest)
+        AND NOT artifact_digest_has_other_live_reference(artifact_manifests.artifact_digest,$1,artifact_manifests.manifest_digest)
         FOR UPDATE`, [tenantId, candidate.manifest_digest, candidate.version, now]);
       if (!guarded.rowCount) return undefined; const intentId = randomUUID(); const expiresAt = new Date(Date.now() + 60_000).toISOString();
       const fenced = await client.query(`UPDATE artifact_gc_candidates SET intent_id=$4,intent_fence=intent_fence+1,intent_expires_at=$5
@@ -102,9 +86,4 @@ export class ArtifactLineageStore {
 }
 async function statusEvent(client: pg.PoolClient, tenantId: string, digest: string, version: number, status: string, reason: string, actor: string) {
   await client.query("INSERT INTO artifact_status_events(tenant_id,manifest_digest,event_version,status,reason,actor) VALUES($1,$2,$3,$4,$5,$6)", [tenantId, digest, version, status, reason, actor]);
-}
-async function assertAcyclic(client: pg.PoolClient, tenantId: string, root: string) {
-  const cycle = await client.query(`WITH RECURSIVE graph(digest,path) AS (SELECT dependency_digest,ARRAY[manifest_digest,dependency_digest] FROM artifact_dependencies WHERE tenant_id=$1 AND manifest_digest=$2
-    UNION ALL SELECT d.dependency_digest,g.path||d.dependency_digest FROM graph g JOIN artifact_dependencies d ON d.tenant_id=$1 AND d.manifest_digest=g.digest WHERE NOT d.dependency_digest=ANY(g.path))
-    SELECT 1 FROM graph WHERE digest=$2 LIMIT 1`, [tenantId, root]); if (cycle.rowCount) throw new TypeError("ARTIFACT_DEPENDENCY_CYCLE");
 }

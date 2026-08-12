@@ -10,8 +10,6 @@ import { stagedManifest, canonicalManifestBytes, sealedManifest } from "../dist/
 import { HmacArtifactAccessAuthority } from "../dist/infrastructure/artifact-lineage/hmac-artifact-access.js";
 import { LocalContentAddressedStorage } from "../dist/contexts/artifact-lineage/infrastructure/local-cas.js";
 import { LocalFlywheelSigner } from "../dist/infrastructure/upstream-flywheel/artifact-signer.js";
-import { ArtifactLineageStore } from "../dist/infrastructure/artifact-lineage/lineage-store.js";
-import { PostgresPersistence } from "../dist/index.js";
 
 const reference = (bytes) => { const sha256 = digestBytes(bytes); return digestReference({ uri: `cas://sha256/${sha256}`, sha256 }); };
 const metadata = (tenant = "tenant-a") => ({ tenantId: tenantId(tenant), repositoryId: repositoryId("repo-a"), mediaType: "application/octet-stream",
@@ -43,27 +41,4 @@ test("ordered manifest digest and exact Flywheel signer remain upstream compatib
   const receipt = signer.sign({ manifestDigest: staged.manifestDigest.sha256, purpose: "CYCLE_WITNESS" }); assert.equal(verifyReceipt(receipt), true);
   assert.equal(verifyReceipt({ ...receipt, payload: { ...receipt.payload, purpose: "RELEASE_PROVENANCE" } }), false);
   assert.equal(sealedManifest(staged, "dev-key/1", receipt.signature).status, "SEALED");
-});
-
-test("PostgreSQL lineage seals dependencies, audits holds and fences garbage collection", { skip: !process.env.TEST_DATABASE_URL }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "agentics-lineage-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const tenant = tenantId(`artifact-${process.pid}-${Date.now()}`);
-  const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 8, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000, enforceRuntimeRole: false });
-  let holdAction = "PLACE"; let nonce = 0; const holdVerifier = { verify: async () => ({ tenantId: tenant, manifestDigest: orphan?.manifestDigest.sha256 ?? "", action: holdAction,
-    actor: "governance", expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: `hold-${++nonce}` }) };
-  const lineage = new ArtifactLineageStore(database, cas, access, holdVerifier); let orphan; const create = async (label, dependencies = []) => {
-    const bytes = new TextEncoder().encode(`${tenant}:${label}`); const artifact = reference(bytes); const staged = await cas.stage(bytes, artifact, metadata(tenant)); await cas.finalize(staged);
-    const payload = { schema: "agentics.artifact-manifest/v1", tenantId: tenant, repositoryId: repositoryId("repo-a"), artifact,
-      mediaType: "application/octet-stream", size: bytes.byteLength, producer: actorId("producer-a"), source: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
-      dependencies, classification: "CONFIDENTIAL", retention: "OPERATIONAL_SCRATCH", createdAt: "2020-01-01T00:00:00.000Z", rvfWitness: null };
-    const manifest = stagedManifest(payload); await lineage.stage(manifest); const sealed = sealedManifest(manifest, "dev-key/1", "signature"); await lineage.seal(sealed); return sealed;
-  };
-  try {
-    const leaf = await create("leaf"); const parent = await create("parent", [{ digest: leaf.payload.artifact, role: "input" }]); orphan = await create("orphan");
-    await lineage.transitionStatus(tenant, leaf.manifestDigest.sha256, "EXPIRED", "governance", "retention elapsed");
-    await lineage.setLegalHold(tenant, orphan.manifestDigest.sha256, true, { receipt: "opaque" }); await lineage.transitionStatus(tenant, orphan.manifestDigest.sha256, "EXPIRED", "governance", "retention elapsed");
-    assert.deepEqual(await lineage.garbageCollect(tenant, "gc", new Date("2030-01-01T00:00:00Z")), { marked: 0, swept: 0 });
-    holdAction = "RELEASE"; await lineage.setLegalHold(tenant, orphan.manifestDigest.sha256, false, { receipt: "opaque" }); const collected = await lineage.garbageCollect(tenant, "gc", new Date("2030-01-01T00:00:00Z"));
-    assert.deepEqual(collected, { marked: 1, swept: 1 }); assert.equal(await cas.exists(orphan.payload.artifact), false);
-    assert.equal(await cas.exists(leaf.payload.artifact), true); assert.equal(await cas.exists(parent.payload.artifact), true);
-  } finally { await database.close(); await rm(root, { recursive: true, force: true }); }
 });

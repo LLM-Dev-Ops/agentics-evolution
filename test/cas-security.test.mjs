@@ -47,3 +47,15 @@ test("delete requires a scoped live fenced intent token", async () => {
     await cas.delete(ref, token()); assert.equal(await cas.exists(ref), false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("identical bytes have independent tenant scopes and cannot be deleted by an unscoped tenant", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cas-shared-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode("shared"); const ref = reference(bytes);
+  const tenantB = tenantId("tenant-b"); const repoB = repositoryId("repo-b"); const metadataB = { ...metadata, tenantId: tenantB, repositoryId: repoB };
+  try {
+    await cas.finalize(await cas.stage(bytes, ref, metadata)); await cas.finalize(await cas.stage(bytes, ref, metadataB));
+    assert.deepEqual([...await cas.read(ref, readGrant())], [...bytes]);
+    assert.deepEqual([...await cas.read(ref, access.issueRead({ tenantId: tenantB, repositoryId: repoB, expiresAt: new Date(Date.now() + 60_000).toISOString() }))], [...bytes]);
+    const wrong = access.issueDelete({ tenantId: tenantId("tenant-c"), repositoryId: repositoryId("repo-c"), digest: ref.sha256, intentId: "unscoped", expiresAt: new Date(Date.now() + 60_000).toISOString(), fencingToken: 1 });
+    await assert.rejects(cas.delete(ref, wrong), /NOT_FOUND/); assert.equal(await cas.exists(ref), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
