@@ -1,5 +1,6 @@
 schemaVersion: agentics.context-boundaries/v1
 root: src/contexts
+packageName: agentics-evolution
 contexts:
   - observation
   - dream

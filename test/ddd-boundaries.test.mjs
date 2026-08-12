@@ -9,6 +9,7 @@ const validator = new URL("../scripts/check-ddd-boundaries.mjs", import.meta.url
 const names = ["observation", "dream", "evolution", "evaluation", "governance", "operations", "brain-knowledge", "repository-integration", "artifact-lineage", "evaluation-corpus"];
 const configuration = `schemaVersion: agentics.context-boundaries/v1
 root: src/contexts
+packageName: agentics-evolution
 contexts: [${names.join(", ")}]
 requiredLayers: [domain, application, infrastructure]
 publicEntrypoint: index.ts
@@ -71,6 +72,9 @@ for (const [name, path, source, pattern] of [
   ["direct upstream import", "src/contexts/evolution/application/index.ts", "import type { Darwin } from '@metaharness/darwin';\n", /raw upstream type\/import/],
   ["dynamic upstream import", "src/contexts/evolution/infrastructure/index.ts", "const api = import('@metaharness/darwin');\n", /raw upstream type\/import/],
   ["import-type upstream leak", "src/contexts/evolution/application/index.ts", "export type Raw = import('@metaharness/darwin').Config;\n", /raw upstream type\/import/]
+  ,["CommonJS upstream require", "src/contexts/evolution/infrastructure/index.ts", "const api = require('@metaharness/darwin');\n", /raw upstream type\/import/]
+  ,["non-kernel module escape", "src/contexts/dream/domain/index.ts", "import '../../../trust/index.js';\n", /cannot import non-kernel module/]
+  ,["package self-import bypass", "src/contexts/dream/application/index.ts", "import 'agentics-evolution/contexts/observation';\n", /self-import bypasses/]
 ]) {
   test(`rejects ${name}`, async () => expectFailure(validate(await fixture({ [path]: source })), pattern));
 }

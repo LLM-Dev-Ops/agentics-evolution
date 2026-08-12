@@ -1,6 +1,7 @@
 export type Currency = string & { readonly __currency: unique symbol };
 export interface Money { readonly minorUnits: bigint; readonly currency: Currency; }
 const CURRENCY = /^[A-Z]{3}$/;
+const MAX_MINOR_UNITS = 10n ** 24n;
 
 export function currency(value: string): Currency {
   if (!CURRENCY.test(value)) throw new TypeError("currency must be a three-letter uppercase ISO code");
@@ -8,7 +9,7 @@ export function currency(value: string): Currency {
 }
 
 export function money(minorUnits: bigint, code: string): Readonly<Money> {
-  if (minorUnits < 0n) throw new RangeError("money cannot be negative");
+  if (minorUnits < 0n || minorUnits > MAX_MINOR_UNITS) throw new RangeError("money is outside supported minor-unit range");
   return Object.freeze({ minorUnits, currency: currency(code) });
 }
 

@@ -13,9 +13,5 @@ export function transitionTrust(current: TrustState | null, command: TrustComman
   if (!gate) throw new TypeError(`required gate evidence missing for ${command}`);
   return next;
 }
-const servingBrand: unique symbol = Symbol("ServingAuthorization");
+declare const servingBrand: unique symbol;
 export interface ServingAuthorization { readonly aggregateId: string; readonly [servingBrand]: true; }
-export function servingAuthorization(state: TrustState, aggregateId: string): ServingAuthorization {
-  if (state !== "AUTHORIZED") throw new TypeError("only AUTHORIZED state may produce serving authorization");
-  return Object.freeze({ aggregateId, [servingBrand]: true as const });
-}

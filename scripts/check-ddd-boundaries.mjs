@@ -1,11 +1,12 @@
-import { readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
 import ts from "typescript";
 import { parse } from "yaml";
 
-const repository = resolve(process.argv[2] ?? ".");
-const config = parse(await readFile(resolve(repository, process.argv[3] ?? "config/context-boundaries.yaml"), "utf8"));
+const positional = process.argv.slice(2).filter((argument) => !argument.startsWith("--"));
+const repository = resolve(positional[0] ?? ".");
+const config = parse(await readFile(resolve(repository, positional[1] ?? "config/context-boundaries.yaml"), "utf8"));
 const contextsRoot = resolve(repository, config.root);
 const normalized = (value) => value.split(sep).join("/");
 const errors = [];
@@ -53,6 +54,14 @@ function checkReference(file, specifier, isExport) {
     errors.push(`${from.location}: raw upstream type/import '${specifier}' leaks into a bounded context`);
   if (!expected.has(from.context)) return;
   const target = targetParts(file, specifier);
+  if (specifier.startsWith(".")) {
+    const resolved = resolve(dirname(file), specifier);
+    const sharedKernel = resolve(repository, "src/shared-kernel");
+    if (!resolved.startsWith(contextsRoot + sep) && !resolved.startsWith(sharedKernel + sep))
+      errors.push(`${from.location}: bounded context cannot import non-kernel module '${specifier}'`);
+  } else if (specifier === config.packageName || specifier.startsWith(`${config.packageName}/`)) {
+    errors.push(`${from.location}: package self-import bypasses context boundaries`);
+  }
   if (!target || !expected.has(target.context)) return;
   if (from.location === `${config.root}/${from.context}/${config.publicEntrypoint}` &&
       config.forbiddenPublicSegments.includes(target.segment))
@@ -99,6 +108,8 @@ for (const file of await sourceFiles(contextsRoot)) {
       checkReference(file, node.argument.literal.text, false);
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && ts.isStringLiteral(node.arguments[0]))
       checkReference(file, node.arguments[0].text, false);
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "require" && ts.isStringLiteral(node.arguments[0]))
+      checkReference(file, node.arguments[0].text, false);
     ts.forEachChild(node, visit);
   };
   visit(ast);
@@ -106,3 +117,10 @@ for (const file of await sourceFiles(contextsRoot)) {
 }
 
 if (errors.length) { console.error([...new Set(errors)].sort().join("\n")); process.exit(1); }
+if (process.argv.includes("--report")) {
+  await mkdir(resolve(repository, "reports"), { recursive: true });
+  await writeFile(resolve(repository, "reports/prompt-02-ddd-boundaries.json"), `${JSON.stringify({
+    schemaVersion: "agentics.prompt-02-ddd-boundaries/v1", contexts: [...expected], filesScanned: (await sourceFiles(contextsRoot)).length,
+    violations: 0, passed: true
+  }, null, 2)}\n`);
+}

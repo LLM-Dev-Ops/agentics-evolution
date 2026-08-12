@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { createSigner, sha256, signEnvelope } from "./lib/evidence.mjs";
 
 const required = [
@@ -16,6 +16,9 @@ const required = [
 ];
 const subjects = [];
 for (const path of required) subjects.push({ path, sha256: sha256(await readFile(path)) });
+for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-boundaries.json"]) {
+  if (await access(path).then(() => true, () => false)) subjects.push({ path, sha256: sha256(await readFile(path)) });
+}
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
 if (dirty) throw new Error("refusing provenance generation from a dirty tracked worktree");
@@ -26,7 +29,7 @@ const statement = {
   predicateType: "https://slsa.dev/provenance/v1",
   predicate: {
     buildDefinition: {
-      buildType: "https://agentics.dev/build-types/prompt-01-evidence/v1",
+      buildType: subjects.some(({ path }) => path.includes("prompt-02")) ? "https://agentics.dev/build-types/prompt-02-evidence/v1" : "https://agentics.dev/build-types/prompt-01-evidence/v1",
       externalParameters: { source: { uri: "git+https://github.com/LLM-Dev-Ops/agentics-evolution", digest: { gitCommit: commit } } },
       internalParameters: { command: "npm run verify:prompt-01", evidenceMode: process.env.AGENTICS_EVIDENCE_MODE ?? "production" },
       resolvedDependencies: [

@@ -22,7 +22,20 @@ export function createEnvelope<P extends Record<string, unknown>>(input: Evoluti
   utcInstant(input.occurredAt); causationId(input.causationId); correlationId(input.correlationId); idempotencyKey(input.idempotencyKey);
   sourceSnapshot(input.sourceRef);
   for (const reference of input.evidence) digestReference(reference);
-  canonicalJson(input.payload);
+  const inspectScope = (value: unknown, depth = 0): void => {
+    if (depth > 32) throw new TypeError("envelope nesting exceeds 32 levels");
+    if (Array.isArray(value)) { for (const item of value) inspectScope(item, depth + 1); return; }
+    if (!value || typeof value !== "object") return;
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (["__proto__", "prototype", "constructor"].includes(key)) throw new TypeError("unsafe envelope object key");
+      if (key === "tenantId" && nested !== input.tenantId) throw new TypeError("cross-tenant envelope reference");
+      if (key === "repositoryId" && nested !== input.repositoryId) throw new TypeError("cross-repository envelope reference");
+      inspectScope(nested, depth + 1);
+    }
+  };
+  inspectScope(input.payload);
+  const canonical = canonicalJson(input);
+  if (Buffer.byteLength(canonical) > 1_048_576) throw new TypeError("envelope exceeds one MiB");
   return deepFreeze(structuredClone(input)) as Readonly<EvolutionEnvelope<P>>;
 }
 export const encodeEnvelope = (value: EvolutionEnvelope): Uint8Array => new TextEncoder().encode(canonicalJson(value));
