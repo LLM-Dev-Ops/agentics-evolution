@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { spawn } from "node:child_process";
 import { digestBytes, digestReference, repositoryId, tenantId } from "../dist/index.js";
 import { HmacArtifactAccessAuthority } from "../dist/infrastructure/artifact-lineage/hmac-artifact-access.js";
 import { LocalContentAddressedStorage } from "../dist/contexts/artifact-lineage/infrastructure/local-cas.js";
@@ -69,4 +70,16 @@ test("concurrent tenant finalization preserves every scope without lost updates"
     for (const scope of scopes) assert.deepEqual([...await cas.read(ref, access.issueRead({ tenantId: scope.tenantId, repositoryId: scope.repositoryId,
       expiresAt: new Date(Date.now() + 60_000).toISOString() }))], [...bytes]);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("expired lock cannot be stolen from a live owner and recovers after SIGKILL", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cas-kill-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode("kill-recovery"); const ref = reference(bytes);
+  const staged = await cas.stage(bytes, ref, metadata); const lock = join(root, "locks", ref.sha256);
+  const child = spawn(process.execPath, [new URL("fixtures/cas-lock-owner.mjs", import.meta.url).pathname, lock], { stdio: ["ignore", "pipe", "inherit"] });
+  try {
+    await new Promise((resolve) => child.stdout.once("data", resolve));
+    let resolved = false; const pending = cas.finalize(staged).then(() => { resolved = true; }); await new Promise((resolve) => setTimeout(resolve, 100)); assert.equal(resolved, false);
+    child.kill("SIGKILL"); await new Promise((resolve) => child.once("exit", resolve));
+    await pending; assert.equal(await cas.exists(ref), true);
+  } finally { child.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
 });

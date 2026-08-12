@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { PostgresPersistence } from "../../persistence/postgres.js";
-import type { ContentAddressedStoragePort } from "../../contexts/artifact-lineage/application/cas-port.js";
+import type { ContentAddressedStoragePort, StagedArtifact } from "../../contexts/artifact-lineage/application/cas-port.js";
 import type { ArtifactAccessAuthority } from "../../contexts/artifact-lineage/application/cas-port.js";
 import type { LegalHoldAuthorization, LegalHoldAuthorizationVerifier } from "../../contexts/artifact-lineage/application/legal-hold-authorization.js";
 import type { ArtifactManifest } from "../../contexts/artifact-lineage/domain/artifact-manifest.js";
@@ -12,9 +12,16 @@ const MINIMUM_RETENTION_DAYS = { OPERATIONAL_SCRATCH: 7, CANDIDATE_ARCHIVE: 30, 
 export class ArtifactLineageStore {
   constructor(readonly database: PostgresPersistence, readonly cas: ContentAddressedStoragePort, readonly access: ArtifactAccessAuthority, readonly holdVerifier?: LegalHoldAuthorizationVerifier) {}
   async stage(manifest: ArtifactManifest): Promise<void> {
+    void manifest; throw new TypeError("RAW_MANIFEST_STAGE_DISABLED_USE_PUBLISH_STAGED");
+  }
+  async publishStaged(manifest: ArtifactManifest, staged: StagedArtifact): Promise<void> {
     if (manifest.status !== "STAGED") throw new TypeError("STAGED_MANIFEST_REQUIRED"); const payload = manifest.payload;
+    if (staged.expected.sha256 !== payload.artifact.sha256 || staged.metadata.tenantId !== payload.tenantId || staged.metadata.repositoryId !== payload.repositoryId)
+      throw new TypeError("STAGED_ARTIFACT_SCOPE_MISMATCH");
     await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [payload.artifact.sha256]);
+      await this.cas.finalize(staged); const grant = this.access.issueRead({ tenantId: payload.tenantId, repositoryId: payload.repositoryId, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+      const bytes = await this.cas.read(payload.artifact, grant); if (bytes.byteLength !== payload.size) throw new TypeError("PUBLISHED_ARTIFACT_SIZE_MISMATCH");
       const existing = await client.query("SELECT payload FROM artifact_manifests WHERE tenant_id=$1 AND manifest_digest=$2", [payload.tenantId, manifest.manifestDigest.sha256]);
       if (existing.rowCount) { if (JSON.stringify(existing.rows[0].payload) !== JSON.stringify(payload)) throw new TypeError("MANIFEST_IDEMPOTENCY_CONFLICT"); return; }
       const retainUntil = new Date(Date.parse(payload.createdAt) + MINIMUM_RETENTION_DAYS[payload.retention] * 86_400_000);
