@@ -188,26 +188,25 @@ test("shared delivery-source contract passes durable local consumer", { skip: !u
 
 test("delayed and reordered delivery cannot violate aggregate version application", { skip: !url }, async () => {
   const database = new PostgresPersistence(configuration); const transport = new PostgresLocalTransport(database);
-  const aggregate = `ordered-${process.pid}-${Date.now()}`; const firstEnvelope = messageEnvelope(51, "tenant-a", aggregate, 51); const secondEnvelope = messageEnvelope(52, "tenant-a", aggregate, 52);
-  const makeMessage = (envelope) => ({ envelope, orderingKey: `tenant-a/repo-a/${aggregate}`, attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } });
+  const tenant = `ordered-${process.pid}-${Date.now()}`; const aggregate = `aggregate-${process.pid}-${Date.now()}`; const firstEnvelope = messageEnvelope(51, tenant, aggregate, 51); const secondEnvelope = messageEnvelope(52, tenant, aggregate, 52);
+  const makeMessage = (envelope) => ({ envelope, orderingKey: `${tenant}/repo-a/${aggregate}`, attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } });
   try {
-    await database.tenantTransaction("tenant-a", "READ COMMITTED", (client) => client.query("DELETE FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=ANY($1::uuid[])", [[firstEnvelope.id, secondEnvelope.id]]).then(() => undefined));
     await transport.publish("evolution.events.v1", makeMessage(firstEnvelope)); await transport.publish("evolution.events.v1", makeMessage(secondEnvelope));
-    const queued = await database.pool.query("SELECT message_id,event_id FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=ANY($1::uuid[])", [[firstEnvelope.id, secondEnvelope.id]]);
+    const queued = await database.pool.query("SELECT message_id,event_id FROM local_transport_messages WHERE tenant_id=$1 AND event_id=ANY($2::uuid[])", [tenant, [firstEnvelope.id, secondEnvelope.id]]);
     const firstId = queued.rows.find((row) => row.event_id === firstEnvelope.id).message_id;
-    await transport.delay("tenant-a", firstId, new Date(Date.now() + 60_000));
-    const deliveredSecond = await transport.pull("tenant-a", "evolution.events.v1", 10); const second = deliveredSecond.find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(second);
-    await database.pool.query("INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state) VALUES('tenant-a','repo-a',$1,'ordered-consumer',0,'{}')", [aggregate]);
+    await transport.delay(tenant, firstId, new Date(Date.now() + 60_000));
+    const deliveredSecond = await transport.pull(tenant, "evolution.events.v1", 10); const second = deliveredSecond.find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(second);
+    await database.pool.query("INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state) VALUES($1,'repo-a',$2,'ordered-consumer',0,'{}')", [tenant, aggregate]);
     const consumer = new OrderedEnvelopeConsumer(database, `ordered-${aggregate}`);
     const persist = (event, version) => async (client) => { await client.query(`INSERT INTO domain_events(tenant_id,repository_id,aggregate_id,event_id,aggregate_version,event_type,envelope,occurred_at)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [event.tenantId, event.repositoryId, event.aggregateId, event.id, version, event.type, event, event.occurredAt]); return version; };
-    assert.equal((await consumer.apply(second.message.envelope, 2, persist(second.message.envelope, 2))).kind, "GAP_DEFERRED"); await transport.defer("tenant-a", second.messageId, second.leaseToken, 60_000);
-    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE tenant_id='tenant-a' AND event_id=$1", [firstEnvelope.id]);
-    const delivery = await transport.pull("tenant-a", "evolution.events.v1", 10); const one = delivery.find((item) => item.message.envelope.id === firstEnvelope.id); assert.ok(one);
-    assert.equal((await consumer.apply(one.message.envelope, 1, persist(one.message.envelope, 1))).kind, "APPLIED"); await transport.ack("tenant-a", one.messageId, one.leaseToken);
-    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp() WHERE tenant_id='tenant-a' AND event_id=$1", [secondEnvelope.id]);
-    const retry = (await transport.pull("tenant-a", "evolution.events.v1", 10)).find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(retry);
-    assert.equal((await consumer.apply(retry.message.envelope, 2, persist(retry.message.envelope, 2))).kind, "APPLIED"); await transport.ack("tenant-a", retry.messageId, retry.leaseToken);
+    assert.equal((await consumer.apply(second.message.envelope, 2, persist(second.message.envelope, 2))).kind, "GAP_DEFERRED"); await transport.defer(tenant, second.messageId, second.leaseToken, 60_000);
+    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE tenant_id=$1 AND event_id=$2", [tenant, firstEnvelope.id]);
+    const delivery = await transport.pull(tenant, "evolution.events.v1", 10); const one = delivery.find((item) => item.message.envelope.id === firstEnvelope.id); assert.ok(one);
+    assert.equal((await consumer.apply(one.message.envelope, 1, persist(one.message.envelope, 1))).kind, "APPLIED"); await transport.ack(tenant, one.messageId, one.leaseToken);
+    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp() WHERE tenant_id=$1 AND event_id=$2", [tenant, secondEnvelope.id]);
+    const retry = (await transport.pull(tenant, "evolution.events.v1", 10)).find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(retry);
+    assert.equal((await consumer.apply(retry.message.envelope, 2, persist(retry.message.envelope, 2))).kind, "APPLIED"); await transport.ack(tenant, retry.messageId, retry.leaseToken);
   } finally { await database.close(); }
 });
 
