@@ -70,6 +70,29 @@ test("serializable retry is bounded, jittered and never retries permanent errors
   assert.equal(attempts, 1);
 });
 
+test("real PostgreSQL 40001 rolls back and retries on a fresh transaction", { skip: !url }, async () => {
+  const resourceId = `serialization-${process.pid}-${Date.now()}`; const admin = new Client({ connectionString: url }); await admin.connect();
+  await admin.query("INSERT INTO critical_resources(tenant_id,repository_id,resource_type,resource_id,remaining) VALUES('tenant-a','repo-a','budget',$1,2)", [resourceId]); await admin.end();
+  let attempts = 0; let competingWriteDone = false;
+  const result = await withSerializableRetry(async () => {
+    attempts++; const transaction = new Client({ connectionString: url }); await transaction.connect();
+    try {
+      await transaction.query("BEGIN ISOLATION LEVEL SERIALIZABLE");
+      const before = await transaction.query("SELECT remaining FROM critical_resources WHERE tenant_id='tenant-a' AND repository_id='repo-a' AND resource_type='budget' AND resource_id=$1", [resourceId]);
+      if (!competingWriteDone) {
+        const competitor = new Client({ connectionString: url }); await competitor.connect();
+        await competitor.query("UPDATE critical_resources SET remaining=remaining-1 WHERE tenant_id='tenant-a' AND repository_id='repo-a' AND resource_type='budget' AND resource_id=$1", [resourceId]);
+        await competitor.end(); competingWriteDone = true;
+      }
+      await transaction.query("UPDATE critical_resources SET remaining=$2 WHERE tenant_id='tenant-a' AND repository_id='repo-a' AND resource_type='budget' AND resource_id=$1", [resourceId, Number(before.rows[0].remaining) - 1]);
+      await transaction.query("COMMIT"); return Number(before.rows[0].remaining) - 1;
+    } catch (error) { await transaction.query("ROLLBACK").catch(() => undefined); throw error; }
+    finally { await transaction.end(); }
+  }, { maxAttempts: 3, baseDelayMs: 1, deadlineMs: Date.now() + 5_000, sleep: async () => undefined });
+  assert.equal(attempts, 2); assert.equal(result, 0);
+  const verify = new Client({ connectionString: url }); await verify.connect(); assert.equal(Number((await verify.query("SELECT remaining FROM critical_resources WHERE resource_id=$1", [resourceId])).rows[0].remaining), 0); await verify.end();
+});
+
 test("transport enforces exact 256 KiB UTF-8 boundary and trace binding", () => {
   const envelope = messageEnvelope(35); const attributes = { correlationId: envelope.correlationId, causationId: envelope.causationId,
     traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01" };
