@@ -2,6 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { canonicalJson, hasCurrentReceiptShape, mapUpstreamError, negotiateVersion, withDeadline } from "../dist/upstream/contract.js";
 
+const ACL_MATRIX = [
+  ["metaharness", "HarnessAnalysisPort"], ["darwin", "DarwinEvolutionPort"],
+  ["flywheel", "FlywheelProofPort"], ["brain", "BrainKnowledgePort"],
+  ["ruflo", "RufloCoordinationPort"], ["redblue", "RedBluePort"],
+  ["turn-credit", "TurnCreditPort"], ["router", "ModelRoutingPort"], ["harness", "HarnessKernelPort"]
+];
+
 test("DDD-008 golden serialization is stable across insertion order", () => {
   const golden = '{"correlationId":"corr-1","payload":{"a":1,"z":2},"schemaVersion":"agentics.upstream-call/v1"}';
   assert.equal(canonicalJson({ schemaVersion: "agentics.upstream-call/v1", payload: { z: 2, a: 1 }, correlationId: "corr-1" }), golden);
@@ -27,6 +34,18 @@ test("DDD-008 deadline aborts the actual operation", async () => {
     signal.addEventListener("abort", () => reject(signal.reason), { once: true });
     setTimeout(resolve, 1_000);
   }), 10), /deadline exceeded/);
+});
+
+test("DDD-008 compatibility matrix runs serialization, errors, deadlines, and version fallback per ACL", async () => {
+  for (const [authority, acl] of ACL_MATRIX) {
+    const serialized = canonicalJson({ schemaVersion: "v1", authority, acl, payload: { z: 2, a: 1 } });
+    assert.equal(serialized, canonicalJson({ payload: { a: 1, z: 2 }, acl, authority, schemaVersion: "v1" }));
+    assert.equal(mapUpstreamError(authority, { code: "ETIMEDOUT", message: `${acl} timed out` }).retryable, true);
+    assert.equal(negotiateVersion(["v2", "v1"], ["v1", "legacy-v0"]), "v1");
+    await assert.rejects(withDeadline((signal) => new Promise((_, reject) => {
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+    }), 1), /deadline exceeded/);
+  }
 });
 
 test("Flywheel current receipts remain verifiable and altered legacy shapes fail closed", async () => {

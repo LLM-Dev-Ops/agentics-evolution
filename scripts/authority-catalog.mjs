@@ -30,6 +30,15 @@ function validatePackage(entry, path, { authority = false } = {}) {
     if (!['cli', 'module'].includes(entry.probe)) failures.push(`${path}.probe: expected cli or module`);
     if (typeof entry.adapter !== "string" || !entry.adapter.startsWith("infrastructure/upstream-")) failures.push(`${path}.adapter: invalid`);
     nonEmptyStrings(entry.requiredCapabilities, `${path}.requiredCapabilities`, failures);
+    const mapped = entry.capabilityTests;
+    if (!mapped || typeof mapped !== "object" || Array.isArray(mapped)) failures.push(`${path}.capabilityTests: expected a map`);
+    else {
+      const expected = [...entry.requiredCapabilities].sort();
+      const actual = Object.keys(mapped).sort();
+      if (JSON.stringify(actual) !== JSON.stringify(expected)) failures.push(`${path}.capabilityTests: keys must exactly match requiredCapabilities`);
+      for (const [capability, testId] of Object.entries(mapped))
+        if (typeof testId !== "string" || !/^[a-z0-9.-]+$/.test(testId)) failures.push(`${path}.capabilityTests.${capability}: invalid test id`);
+    }
     nonEmptyStrings(entry.upstreamAdrs, `${path}.upstreamAdrs`, failures);
     if (!Array.isArray(entry.deviations)) failures.push(`${path}.deviations: expected an array`);
     for (const [index, deviation] of (entry.deviations ?? []).entries()) {
@@ -69,6 +78,9 @@ export async function loadAuthorityCatalog(path = "config/upstream-authorities.y
     if (typeof source?.build !== "string" || !source.build.includes("--locked")) failures.push(`${path}.build: must be locked`);
     if (typeof source?.binary !== "string" || source.binary.startsWith("/")) failures.push(`${path}.binary: invalid`);
     nonEmptyStrings(source?.requiredCapabilities, `${path}.requiredCapabilities`, failures);
+    const mapped = source?.capabilityTests;
+    if (!mapped || JSON.stringify(Object.keys(mapped).sort()) !== JSON.stringify([...source.requiredCapabilities].sort()))
+      failures.push(`${path}.capabilityTests: keys must exactly match requiredCapabilities`);
     nonEmptyStrings(source?.contractTests, `${path}.contractTests`, failures);
     if (!Array.isArray(source?.deviations)) failures.push(`${path}.deviations: expected an array`);
   }
@@ -81,6 +93,11 @@ export async function loadAuthorityCatalog(path = "config/upstream-authorities.y
   for (const source of catalog?.sourceAuthorities ?? [])
     for (const testPath of source.contractTests ?? [])
       try { await access(testPath); } catch { failures.push(`${source.name}: contract test missing: ${testPath}`); }
+  for (const entry of [...(catalog?.authorities ?? []), ...(catalog?.sourceAuthorities ?? [])]) {
+    const texts = await Promise.all((entry.contractTests ?? []).map((testPath) => readFile(testPath, "utf8").catch(() => "")));
+    for (const testId of Object.values(entry.capabilityTests ?? {}))
+      if (!texts.some((testText) => testText.includes(JSON.stringify(testId)))) failures.push(`${entry.name}: executable test id not found: ${testId}`);
+  }
   return { catalog, text, failures };
 }
 

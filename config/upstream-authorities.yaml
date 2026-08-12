@@ -14,8 +14,9 @@ authorities:
     probe: cli
     requiredExports: []
     requiredCapabilities: [swarm, hooks, daemon, memory]
+    capabilityTests: { swarm: ruflo.swarm.lifecycle, hooks: ruflo.hooks.lifecycle, daemon: ruflo.worker.lifecycle, memory: ruflo.memory.lifecycle }
     upstreamAdrs: [ADR-150, ADR-153, ADR-322, ADR-331, ADR-381]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
   - name: metaharness
     package: metaharness
@@ -26,8 +27,9 @@ authorities:
     probe: module
     requiredExports: [HOSTS, loadCatalog, scaffold]
     requiredCapabilities: [hosts, catalog, scaffold]
+    capabilityTests: { hosts: metaharness.hosts.behavior, catalog: metaharness.catalog.behavior, scaffold: metaharness.scaffold.behavior }
     upstreamAdrs: [ADR-322B]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
   - name: darwin
     package: "@metaharness/darwin"
@@ -38,8 +40,9 @@ authorities:
     probe: module
     requiredExports: [evolve, inspectVariant, validateGeneratedCode]
     requiredCapabilities: [evolve, inspectVariant, validateGeneratedCode]
+    capabilityTests: { evolve: darwin.evolve.behavior, inspectVariant: darwin.inspect.behavior, validateGeneratedCode: darwin.validate.behavior }
     upstreamAdrs: [ADR-322B]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
   - name: flywheel
     package: "@metaharness/flywheel"
@@ -48,8 +51,9 @@ authorities:
     adapter: infrastructure/upstream-flywheel
     owner: platform-evaluation
     probe: module
-    requiredExports: [InMemoryLineageStore, makeSigner, meetsPromotionRule, verifyReceipt, verifyReplayBundle]
-    requiredCapabilities: [lineage, signer, gate, receipt, replay]
+    requiredExports: [InMemoryLineageStore, makeSigner, meetsPromotionRule, verifyReceipt, verifyReplayBundle, sequentialEvidence]
+    requiredCapabilities: [lineage, signer, gate, receipt, replay, sequential]
+    capabilityTests: { lineage: flywheel.lineage.behavior, signer: flywheel.signer.behavior, gate: flywheel.gate.behavior, receipt: flywheel.receipt.behavior, replay: flywheel.replay.behavior, sequential: flywheel.sequential.behavior }
     upstreamAdrs: [ADR-322C]
     contractTests: [test/upstream-contracts.test.mjs]
     deviations: []
@@ -62,8 +66,9 @@ authorities:
     probe: module
     requiredExports: [buildReport, enforceSafetyLimits, patchAndRetest, runBaseline]
     requiredCapabilities: [report, safety, retest, baseline]
+    capabilityTests: { report: redblue.report.behavior, safety: redblue.safety.behavior, retest: redblue.retest.behavior, baseline: redblue.baseline.behavior }
     upstreamAdrs: [ADR-322B]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
   - name: turn-credit
     package: "@metaharness/turn-credit"
@@ -74,6 +79,7 @@ authorities:
     probe: module
     requiredExports: [buildCreditReceiptPayload, processTrajectory, toMemoryFeedback]
     requiredCapabilities: [receipt, trajectory, memory-feedback]
+    capabilityTests: { receipt: turn-credit.receipt.behavior, trajectory: turn-credit.trajectory.behavior, memory-feedback: turn-credit.memory-feedback.behavior }
     upstreamAdrs: [ADR-322C]
     contractTests: [test/upstream-contracts.test.mjs]
     deviations: []
@@ -84,8 +90,9 @@ authorities:
     adapter: infrastructure/upstream-router
     owner: platform-model-gateway
     probe: module
-    requiredExports: [Router, calibrationReport, trainRouter]
-    requiredCapabilities: [route, calibration, train]
+    requiredExports: [Router, calibrationReport, trainRouter, isNativeRouterAvailable]
+    requiredCapabilities: [route, calibration, train, native]
+    capabilityTests: { route: router.route.behavior, calibration: router.calibration.behavior, train: router.train.behavior, native: router.native.behavior }
     upstreamAdrs: [ADR-331]
     contractTests: [test/upstream-contracts.test.mjs]
     deviations: []
@@ -96,10 +103,11 @@ authorities:
     adapter: infrastructure/upstream-harness
     owner: platform-evolution
     probe: module
-    requiredExports: [HarnessKernel, VerifierRegistry, checkGates]
-    requiredCapabilities: [kernel, verifier, gates]
+    requiredExports: [HarnessKernel, VerifierRegistry, checkGates, ReceiptLog]
+    requiredCapabilities: [kernel, verifier, gates, recovery]
+    capabilityTests: { kernel: harness.kernel.behavior, verifier: harness.verifier.behavior, gates: harness.gates.behavior, recovery: harness.recovery.behavior }
     upstreamAdrs: [ADR-322B]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
   - name: ruvector
     package: ruvector
@@ -110,8 +118,9 @@ authorities:
     probe: module
     requiredExports: [Sona, createRvfStore, getVersion, isNativeAvailable, isRvfAvailable]
     requiredCapabilities: [sona, rvf, version, native]
+    capabilityTests: { sona: ruvector.sona.behavior, rvf: ruvector.rvf.behavior, version: ruvector.version.behavior, native: ruvector.native.behavior }
     upstreamAdrs: [ADR-381]
-    contractTests: [test/upstream-contracts.test.mjs]
+    contractTests: [test/upstream-behavior.test.mjs]
     deviations: []
 sourceAuthorities:
   - name: ruvector-brain-local
@@ -123,6 +132,7 @@ sourceAuthorities:
     binary: target/release/mcp-brain-server-local
     owner: platform-brain
     requiredCapabilities: [health, status, share, search]
+    capabilityTests: { health: brain.health.protocol, status: brain.status.protocol, share: brain.share.protocol, search: brain.search.protocol }
     contractTests: [test/brain-local-contract.test.mjs]
     deviations: []
 hosts:

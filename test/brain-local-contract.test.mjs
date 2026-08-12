@@ -7,6 +7,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
 
+const BRAIN_CONTRACT_IDS = ["brain.health.protocol", "brain.status.protocol", "brain.share.protocol", "brain.search.protocol"];
+assert.equal(BRAIN_CONTRACT_IDS.length, 4);
+
 async function loopbackPort() {
   const server = createServer();
   server.listen(0, "127.0.0.1");

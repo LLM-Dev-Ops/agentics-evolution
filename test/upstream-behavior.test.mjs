@@ -8,6 +8,17 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const ruflo = resolve("node_modules/.bin/ruflo");
+const CONTRACT_IDS = [
+  "ruflo.swarm.lifecycle", "ruflo.hooks.lifecycle", "ruflo.worker.lifecycle", "ruflo.memory.lifecycle",
+  "metaharness.hosts.behavior", "metaharness.catalog.behavior", "metaharness.scaffold.behavior",
+  "darwin.evolve.behavior", "darwin.inspect.behavior", "darwin.validate.behavior",
+  "redblue.report.behavior", "redblue.safety.behavior", "redblue.retest.behavior", "redblue.baseline.behavior",
+  "harness.kernel.behavior", "harness.verifier.behavior", "harness.gates.behavior", "harness.recovery.behavior",
+  "router.route.behavior", "router.calibration.behavior", "router.train.behavior",
+  "turn-credit.receipt.behavior", "turn-credit.trajectory.behavior", "turn-credit.memory-feedback.behavior",
+  "ruvector.sona.behavior", "ruvector.rvf.behavior", "ruvector.version.behavior", "ruvector.native.behavior"
+];
+assert.equal(new Set(CONTRACT_IDS).size, CONTRACT_IDS.length);
 
 async function isolatedRuflo(args, cwd, timeout = 20_000) {
   return execFileAsync(ruflo, args, {
@@ -44,7 +55,9 @@ test("Ruflo executes isolated swarm, hook, memory, and worker lifecycles", { tim
 });
 
 test("MetaHarness scaffolds a real host projection with deterministic fingerprint", async () => {
-  const { scaffold } = await import("metaharness");
+  const { HOSTS, loadCatalog, scaffold } = await import("metaharness");
+  assert.ok(HOSTS.includes("codex"));
+  assert.ok(loadCatalog().some((entry) => entry.id === "minimal"));
   const directory = await mkdtemp(join(tmpdir(), "metaharness-contract-"));
   try {
     const options = { name: "contract-harness", template: "minimal", host: "codex", targetDir: join(directory, "harness"), force: false, generatorVersion: "0.4.5" };
@@ -84,6 +97,29 @@ test("Darwin seeded mutation is bounded and rejects unsafe generated behavior", 
   }
 });
 
+test("Darwin executes a bounded seeded evolution campaign", { timeout: 30_000 }, async () => {
+  const { evolve } = await import("@metaharness/darwin");
+  const directory = await mkdtemp(join(tmpdir(), "darwin-evolve-"));
+  try {
+    const result = await evolve({
+      repoRoot: directory,
+      workRoot: join(directory, ".metaharness"),
+      generations: 1,
+      childrenPerGeneration: 1,
+      tasks: ["contract-task"],
+      promotionDelta: 0,
+      concurrency: 1,
+      seed: 23,
+      sandboxMode: "mock"
+    });
+    assert.equal(result.records.length >= 2, true);
+    assert.equal(result.baseline.variant.generation, 0);
+    assert.ok(result.winner);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("RedBlue hard safety rejects network, shell, credentials, and redacts secrets", async () => {
   const redblue = await import("@metaharness/redblue");
   assert.throws(() => redblue.enforceSafetyLimits({
@@ -93,6 +129,24 @@ test("RedBlue hard safety rejects network, shell, credentials, and redacts secre
   assert.throws(() => redblue.assertNoLiveCredential("ghp_abcdefghijklmnopqrstuvwxyz1234567890"));
   assert.doesNotMatch(redblue.redact("token=ghp_abcdefghijklmnopqrstuvwxyz1234567890"), /ghp_/);
   assert.equal(redblue.failureReduction(0.5, 0.1), 0.8);
+});
+
+test("RedBlue executes baseline, patch/retest, and structured report", async () => {
+  const redblue = await import("@metaharness/redblue");
+  const config = redblue.defaultConfig();
+  config.families = ["data_exfiltration_attempt"];
+  const opts = {
+    config,
+    target: redblue.alwaysVulnerableFixture(),
+    judgeClient: redblue.mockMarkerJudge(),
+    blueClient: new redblue.MockModelClient(() => JSON.stringify({ description: "block leak", kind: "output_filter", rule: { blockSubstrings: ["FAKEPLACEHOLDER"] } }))
+  };
+  const baseline = await redblue.runBaseline({ ...opts, numTests: 1 });
+  assert.equal(baseline.results.length, 1);
+  const retest = await redblue.patchAndRetest(baseline, { ...opts, numTests: 1 }, 1);
+  assert.ok(retest.failureReduction >= 0);
+  const report = redblue.buildReport({ runId: "contract", results: baseline.results, rates: baseline.rates, gates: config.gates, costUsd: baseline.costUsd });
+  assert.equal(report.summary.tests_run, 1);
 });
 
 test("Harness enforces DAG ordering and rejects cyclic plans", async () => {
@@ -108,11 +162,31 @@ test("Harness enforces DAG ordering and rejects cyclic plans", async () => {
   ]), /cycle/i);
 });
 
+test("Harness kernel runs verifier and four gates with replayable receipts", async () => {
+  const harness = await import("@metaharness/harness");
+  const router = new harness.AlgorithmRouter({ contract: { intent: "contract", steps: [{ kind: "verify" }] } });
+  const pool = new harness.AgentPool([{ id: "worker", model: "fixture", handles: ["verify"], run: () => ({
+    output: "proved", quality: 1, confidence: 1, risk: 0, costUsd: 0, latencyMs: 1
+  }) }], { rng: () => 0 });
+  const verifiers = new harness.VerifierRegistry().register(harness.predicateVerifier("nonempty", "custom", Boolean));
+  const policy = new harness.PolicyGate([harness.allowTools(["verify"])]);
+  const kernel = new harness.HarnessKernel({ router, pool, verifiers, policy });
+  const result = await kernel.run({ text: "contract", intent: "contract" }, "contract-run");
+  assert.equal(result.success, true);
+  assert.equal(result.receiptsValid, true);
+  assert.equal(result.steps[0].gate.ok, true);
+  const log = new harness.ReceiptLog();
+  log.append({ runId: "recovery", step: "verify", input: {}, output: "ok", agent: "worker", model: "fixture", costUsd: 0, latencyMs: 1, verdict: "pass" });
+  const restored = harness.ReceiptLog.import(log.export());
+  assert.deepEqual(restored.verify(), { ok: true });
+});
+
 test("RuVector executes native vector, RVF persistence, and SONA learning", async () => {
   const ruvector = await import("ruvector");
   assert.equal(ruvector.isNativeAvailable(), true);
   assert.equal(ruvector.isRvfAvailable(), true);
   assert.equal(ruvector.isSonaAvailable(), true);
+  assert.equal(ruvector.getVersion().version, "0.2.41");
   const directory = await mkdtemp(join(tmpdir(), "rvf-contract-"));
   const path = join(directory, "vectors.rvf");
   let store;
