@@ -8,3 +8,7 @@ export function tenantSecurityProfile(value: TenantSecurityProfile): TenantSecur
   for (const [category, baseline] of Object.entries(retentionDays)) if (!Number.isSafeInteger(value.retention[category as RetentionCategory]) || value.retention[category as RetentionCategory] < baseline) throw new TypeError("RETENTION_BELOW_POLICY_MINIMUM");
   return Object.freeze({ ...value, providers: Object.freeze([...new Set(value.providers)].sort()), retention: Object.freeze({ ...value.retention }) });
 }
+export function retentionExpiresAt(category: RetentionCategory, createdAt: string, profile: TenantSecurityProfile): string {
+  const created = Date.parse(createdAt); if (!Number.isFinite(created)) throw new TypeError("INVALID_RETENTION_CLOCK");
+  return new Date(created + profile.retention[category] * 86_400_000).toISOString();
+}

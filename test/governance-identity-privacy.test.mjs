@@ -7,7 +7,7 @@ import { Ed25519DeletionReceiptSigner, Ed25519DeletionReceiptVerifier } from "..
 import { AuthorizationMiddleware } from "../dist/contexts/governance/application/identity.js";
 import { DeletionCoordinator, deletionTombstone } from "../dist/contexts/governance/application/privacy-boundaries.js";
 import { privacySafeLog, tenantCacheKey, tenantKeyAlias, tenantMetricLabel, tenantVectorNamespace } from "../dist/contexts/governance/application/tenant-boundaries.js";
-import { retentionDays, tenantSecurityProfile } from "../dist/contexts/governance/domain/privacy.js";
+import { retentionDays, retentionExpiresAt, tenantSecurityProfile } from "../dist/contexts/governance/domain/privacy.js";
 import { assertNoClassificationDowngrade, authorizeProvider, effectiveClassification } from "../dist/contexts/governance/domain/provider-policy.js";
 
 const now = 1_800_000_000; const issuer = "https://identity.example"; const audience = "agentics-api";
@@ -55,6 +55,8 @@ test("classification, provider, residency and namespace helpers fail closed", ()
   assert.notEqual(tenantMetricLabel(tenant, Buffer.alloc(32, 1)), tenantMetricLabel(tenantId("tenant-b"), Buffer.alloc(32, 1)));
   assert.deepEqual(privacySafeLog({ correlationId: "c", prompt: "raw", accessToken: "secret", ok: true }), { correlationId: "c", ok: true });
   assert.throws(() => tenantCacheKey(tenant, repo, "cycle", "../escape"), /NAMESPACE/);
+  assert.equal(retentionExpiresAt("SCRATCH", "2027-01-01T00:00:00.000Z", profile), "2027-01-08T00:00:00.000Z");
+  assert.throws(() => retentionExpiresAt("SCRATCH", "not-time", profile), /RETENTION_CLOCK/);
 });
 
 test("tombstone deletion requires every boundary and produces a tamper-evident scoped receipt", async () => {
