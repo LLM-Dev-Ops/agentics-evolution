@@ -13,16 +13,18 @@ export class OrderedEnvelopeConsumer {
     if (!Number.isSafeInteger(aggregateVersion) || aggregateVersion < 1) throw new TypeError("INVALID_AGGREGATE_VERSION");
     return this.database.tenantTransaction(event.tenantId, "SERIALIZABLE", async (client) => {
       const digest = digestBytes(new TextEncoder().encode(canonicalJson(event)));
+      const prior = await client.query("SELECT payload_digest FROM inbox WHERE tenant_id=$1 AND consumer=$2 AND event_id=$3", [event.tenantId, this.consumer, event.id]);
+      if (prior.rowCount) {
+        if (prior.rows[0].payload_digest !== digest) throw new TypeError("ORDERED_EVENT_DIGEST_CONFLICT");
+        return { kind: "DUPLICATE" };
+      }
       await client.query(`INSERT INTO consumer_progress(tenant_id,consumer,repository_id,aggregate_id) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
         [event.tenantId, this.consumer, event.repositoryId, event.aggregateId]);
       const current = await client.query(`SELECT aggregate_version,last_event_id,last_payload_digest FROM consumer_progress
         WHERE tenant_id=$1 AND consumer=$2 AND repository_id=$3 AND aggregate_id=$4 FOR UPDATE`, [event.tenantId, this.consumer, event.repositoryId, event.aggregateId]);
       const cursor = current.rows[0]; const expectedVersion = Number(cursor.aggregate_version) + 1;
       if (aggregateVersion > expectedVersion) return { kind: "GAP_DEFERRED", expectedVersion, receivedVersion: aggregateVersion };
-      if (aggregateVersion < expectedVersion) {
-        if (aggregateVersion === Number(cursor.aggregate_version) && cursor.last_event_id === event.id && cursor.last_payload_digest === digest) return { kind: "DUPLICATE" };
-        throw new TypeError("ORDERED_EVENT_CONFLICT");
-      }
+      if (aggregateVersion < expectedVersion) throw new TypeError("ORDERED_EVENT_CONFLICT");
       const result = await effect(client);
       await client.query("INSERT INTO inbox(tenant_id,consumer,event_id,payload_digest) VALUES($1,$2,$3,$4)", [event.tenantId, this.consumer, event.id, digest]);
       await client.query(`UPDATE consumer_progress SET aggregate_version=$5,last_event_id=$6,last_payload_digest=$7,updated_at=transaction_timestamp()

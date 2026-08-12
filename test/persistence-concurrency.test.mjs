@@ -219,8 +219,11 @@ test("ordered consumer applies a real producer event already present in domain h
     const consumer = new OrderedEnvelopeConsumer(database, "real-consumer"); let effects = 0;
     const applied = await consumer.apply(envelope, 1, async () => ++effects); assert.equal(applied.kind, "APPLIED"); assert.equal(effects, 1);
     const duplicate = await consumer.apply(envelope, 1, async () => ++effects); assert.equal(duplicate.kind, "DUPLICATE"); assert.equal(effects, 1);
+    const second = messageEnvelope(62, tenant, aggregate, 62); await consumer.apply(second, 2, async () => ++effects); assert.equal(effects, 2);
+    const delayedFirst = await consumer.apply(envelope, 1, async () => ++effects); assert.equal(delayedFirst.kind, "DUPLICATE"); assert.equal(effects, 2);
+    await assert.rejects(consumer.apply({ ...envelope, payload: { altered: true } }, 1, async () => ++effects), /ORDERED_EVENT_DIGEST_CONFLICT/); assert.equal(effects, 2);
     const cursor = await database.pool.query("SELECT aggregate_version,last_event_id FROM consumer_progress WHERE tenant_id=$1 AND consumer='real-consumer' AND aggregate_id=$2", [tenant, aggregate]);
-    assert.deepEqual(cursor.rows[0], { aggregate_version: "1", last_event_id: envelope.id });
+    assert.deepEqual(cursor.rows[0], { aggregate_version: "2", last_event_id: second.id });
   } finally { await database.close(); }
 });
 

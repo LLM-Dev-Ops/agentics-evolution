@@ -2,8 +2,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import pg from "pg";
+import { readdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
+const migrationVersions = readdirSync("migrations").filter((file) => /^\d+_.*\.sql$/.test(file)).map((file) => Number(file.split("_")[0])).sort((a, b) => a - b);
+const predecessorManifest = JSON.parse(readFileSync("test/fixtures/predecessor-v3.manifest.json", "utf8"));
+const predecessorDigest = createHash("sha256").update(readFileSync("test/fixtures/predecessor-v3-app.mjs")).digest("hex");
 
 function migrate(databaseUrl, extraEnv = {}) {
   return spawnSync(process.execPath, ["scripts/migrate.mjs"], {
@@ -34,7 +40,7 @@ test("every release migration survives interruption and rejects checksum drift",
   try {
     await admin.query(`CREATE DATABASE ${databaseName}`);
     const databaseUrl = new URL(url); databaseUrl.pathname = `/${databaseName}`;
-    for (let version = 1; version <= 9; version++) {
+    for (const version of migrationVersions) {
       const prior = migrate(databaseUrl.toString(), { AGENTICS_MIGRATION_MAX_VERSION: String(version - 1) }); assert.equal(prior.status, 0, prior.stderr);
       await interruptAfterSql(databaseUrl.toString(), version);
       const resumed = migrate(databaseUrl.toString(), { AGENTICS_MIGRATION_MAX_VERSION: String(version) }); assert.equal(resumed.status, 0, resumed.stderr);
@@ -52,6 +58,7 @@ test("every release migration survives interruption and rejects checksum drift",
 });
 
 test("expanded schema permits mixed old and new writers over a production-shaped fixture", { skip: !url }, async () => {
+  assert.equal(predecessorManifest.release, "prompt-03-schema-v3"); assert.equal(predecessorDigest, predecessorManifest.entrypointSha256);
   const databaseName = `agentics_mixed_${process.pid}_${Date.now()}`; assert.match(databaseName, /^[a-z0-9_]+$/);
   const admin = new Client({ connectionString: url }); await admin.connect();
   try {
