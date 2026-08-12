@@ -86,6 +86,8 @@ test("terminal publish failure is attributable and requires authorization to red
     assert.equal(dead.rowCount, 1); assert.deepEqual(dead.rows[0], { reason_code: "PUBLISH_EXHAUSTED", source_topic: "evolution.events.v1",
       repository_id: "repo-crash", aggregate_id: "aggregate-crash", attempts: 1, redrive_count: 0 });
     await assert.rejects(failing.redrive(tenant, eventId, {}), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
+    await assert.rejects(failing.redrive(tenant, eventId, { statement: { purpose: "REDRIVE", tenantId: tenant, repositoryId: "repo-crash", eventId,
+      sourceTopic: "evolution.events.v1", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString() } }), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
     const { privateKey, publicKey } = generateKeyPairSync("ed25519"); const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
     const statement = { schema: "agentics.replay-capability/v1", replayId: `redrive-${eventId}`, issuer: "governance", tenantId: tenant,
       repositoryId: "repo-crash", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId, sourceTopic: "evolution.events.v1" };

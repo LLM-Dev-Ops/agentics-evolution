@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
 import { canonicalJson } from "../shared-kernel/immutable.js";
 import { digestBytes } from "../shared-kernel/digest.js";
-import type { VerifiedReplayCapability } from "../messaging/replay.js";
+import { assertVerifiedReplayCapability, type VerifiedReplayCapability } from "../messaging/replay.js";
 import type { EventTransport, TransportMessage } from "../messaging/transport.js";
 import { PostgresPersistence } from "./postgres.js";
 
@@ -62,7 +62,7 @@ export class OutboxRelay {
       [lease.tenantId, lease.eventId, String(error).slice(0, 128)]);
   }
   async redrive(tenantId: string, eventId: string, capability: VerifiedReplayCapability): Promise<void> {
-    if (!capability?.statement) throw new TypeError("VERIFIED_REPLAY_CAPABILITY_REQUIRED");
+    assertVerifiedReplayCapability(capability);
     await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
       const row = await client.query("SELECT envelope,topic FROM outbox WHERE tenant_id=$1 AND event_id=$2 AND dead_lettered_at IS NOT NULL FOR UPDATE", [tenantId, eventId]);
       if (!row.rows[0]) throw new Error("DEAD_LETTER_NOT_FOUND");

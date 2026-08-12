@@ -31,6 +31,7 @@
     "evidence:sbom": "node scripts/generate-sbom.mjs",
     "evidence:provenance": "node scripts/provenance.mjs",
     "evidence:provenance:prompt-02": "AGENTICS_BUILD_PROMPT=02 node scripts/provenance.mjs",
+    "evidence:provenance:prompt-03": "AGENTICS_BUILD_PROMPT=03 node scripts/provenance.mjs",
     "verify:sbom": "node scripts/validate-sbom.mjs",
     "verify:evidence": "node scripts/verify-evidence.mjs",
     "verify:reproducibility": "node scripts/reproducibility.mjs",

@@ -34,12 +34,15 @@ export class ReplayCapabilityVerifier {
     return deepFreeze({ [replayCapabilityBrand]: true, statement }) as VerifiedReplayCapability;
   }
 }
+export function assertVerifiedReplayCapability(value: unknown): asserts value is VerifiedReplayCapability {
+  if (!value || typeof value !== "object" || (value as Partial<VerifiedReplayCapability>)[replayCapabilityBrand] !== true) throw new TypeError("VERIFIED_REPLAY_CAPABILITY_REQUIRED");
+}
 
 export function replayEffectPolicy(mode: "DRY_RUN" | "LIVE", envelope: EvolutionEnvelope, capability?: VerifiedReplayCapability,
   nowMs = Date.now()): ReplayEffectPolicy {
   if (mode === "DRY_RUN") return deepFreeze({ replay: true, replayId: "dry-run", allowExternalEffects: false, allowNormalTopicPublish: false,
     tenantId: envelope.tenantId, repositoryId: envelope.repositoryId });
-  if (!capability || capability[replayCapabilityBrand] !== true) throw new TypeError("VERIFIED_REPLAY_CAPABILITY_REQUIRED");
+  assertVerifiedReplayCapability(capability);
   const scope = capability.statement;
   if (scope.purpose !== "REPLAY") throw new TypeError("REPLAY_CAPABILITY_REQUIRED");
   if (scope.tenantId !== envelope.tenantId || scope.repositoryId !== envelope.repositoryId || !scope.eventTypes.includes(envelope.type)) throw new TypeError("REPLAY_SCOPE_MISMATCH");
