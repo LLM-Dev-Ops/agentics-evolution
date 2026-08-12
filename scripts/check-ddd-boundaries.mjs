@@ -83,14 +83,25 @@ function checkReference(file, specifier, isExport) {
 }
 function checkEvents(ast, location) {
   const inspect = (node) => {
-    if (ts.isTypeAliasDeclaration(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) && /(?:Event|ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(node.name.text)) {
+    if (ts.isTypeAliasDeclaration(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) &&
+        (node.type.getText(ast).includes("EvolutionEnvelope") || /Event$/.test(node.name.text))) {
       const representation = node.type.getText(ast);
       if (!/(?:^|\W)EvolutionEnvelope\s*</.test(representation))
         errors.push(`${location}: published event alias '${node.name.text}' must use EvolutionEnvelope`);
       if (!/(?:ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(node.name.text))
         errors.push(`${location}: published event alias '${node.name.text}' must use a past-tense name`);
-      if (!/readonly\s+type\s*:/.test(representation))
-        errors.push(`${location}: published event alias '${node.name.text}' must carry readonly literal type`);
+      let matchingLiteral = false;
+      const findType = (candidate) => {
+        if (ts.isPropertySignature(candidate) && candidate.name?.getText(ast).replace(/["']/g, "") === "type") {
+          const readonly = candidate.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword);
+          const literal = candidate.type && ts.isLiteralTypeNode(candidate.type) && ts.isStringLiteral(candidate.type.literal)
+            ? candidate.type.literal.text : undefined;
+          if (readonly && literal === node.name.text) matchingLiteral = true;
+        }
+        ts.forEachChild(candidate, findType);
+      };
+      findType(node.type);
+      if (!matchingLiteral) errors.push(`${location}: published event alias '${node.name.text}' must carry readonly literal type matching its name`);
     }
     const heritage = node.heritageClauses?.flatMap((clause) => clause.types) ?? [];
     const isEvent = (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) &&

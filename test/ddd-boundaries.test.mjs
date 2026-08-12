@@ -105,3 +105,17 @@ test("rejects mutable type-alias events that bypass DomainEvent inheritance", as
   }));
   expectFailure(result, /must use EvolutionEnvelope/);
 });
+
+test("rejects EvolutionEnvelope aliases with non-past names", async () => {
+  const result = validate(await fixture({
+    "src/contexts/dream/published-language.ts": "interface EvolutionEnvelope<T> {}\nexport type Hypothesis = EvolutionEnvelope<{}> & { readonly type: 'Hypothesis' };\n"
+  }));
+  expectFailure(result, /must use a past-tense name/);
+});
+
+test("rejects event aliases whose type discriminator is not a matching literal", async () => {
+  const result = validate(await fixture({
+    "src/contexts/dream/published-language.ts": "interface EvolutionEnvelope<T> {}\nexport type HypothesisProposed = EvolutionEnvelope<{}> & { readonly type: string };\n"
+  }));
+  expectFailure(result, /readonly literal type matching its name/);
+});
