@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { platformGraphFailures } from "./lib/sbom.mjs";
 
 const sbom = JSON.parse(await readFile("reports/sbom.cdx.json", "utf8"));
 if (sbom.bomFormat !== "CycloneDX" || sbom.specVersion !== "1.6") throw new Error("CycloneDX 1.6 SBOM required");
@@ -11,4 +12,6 @@ for (const component of sbom.components) {
 }
 const platformCount = Number(sbom.metadata?.properties?.find(({ name }) => name === "agentics:platform-component-count")?.value);
 if (!Number.isInteger(platformCount) || platformCount < 1) throw new Error("merged platform SBOM evidence is required");
+const graphFailures = platformGraphFailures(sbom);
+if (graphFailures.length) throw new Error(graphFailures.join("\n"));
 console.log(`validated CycloneDX SBOM with ${refs.size} components`);
