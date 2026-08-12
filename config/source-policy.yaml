@@ -1,0 +1,28 @@
+schemaVersion: agentics.source-policy/v1
+maxLines: 500
+scanRoots: [src, scripts, test, config]
+publicEntrypoints: [src/index.ts]
+layers:
+  domain: src/domain
+  application: src/application
+  infrastructure: src/infrastructure
+generatedExemptions:
+  - { path: package-lock.json, reason: npm-generated reproducibility lock }
+  - { path: reports/sbom.cdx.json, reason: CycloneDX-generated evidence, optional: true }
+  - { path: reports/conformance.json, reason: conformance-generated evidence, optional: true }
+allowedUpstreamAdapters:
+  ruflo: src/infrastructure/upstream-ruflo
+  claude-flow: src/infrastructure/upstream-ruflo
+  "@claude-flow/cli": src/infrastructure/upstream-ruflo
+  metaharness: src/infrastructure/upstream-metaharness
+  "@metaharness/darwin": src/infrastructure/upstream-darwin
+  "@metaharness/flywheel": src/infrastructure/upstream-flywheel
+  "@metaharness/redblue": src/infrastructure/upstream-redblue
+  "@metaharness/turn-credit": src/infrastructure/upstream-turn-credit
+  "@metaharness/router": src/infrastructure/upstream-router
+  "@metaharness/harness": src/infrastructure/upstream-harness
+  "@metaharness/kernel": src/infrastructure/upstream-metaharness
+  "@metaharness/host-claude-code": src/infrastructure/upstream-metaharness
+  "@metaharness/host-codex": src/infrastructure/upstream-metaharness
+  ruvector: src/infrastructure/upstream-ruvector
+forbiddenAlgorithmSymbols: [evolve, inspectVariant, validateGeneratedCode, flywheelGate, reasoningBank, nightlyLearner, vectorSearch]
