@@ -1,4 +1,4 @@
-import { link, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { link, mkdir, open, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { digestBytes, digestReference, type DigestReference } from "../../../shared-kernel/digest.js";
@@ -56,14 +56,15 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
     await rm(this.finalPath(reference)); await rm(`${this.finalPath(reference)}.json`, { force: true }); });
   }
   private async withDigestLock<T>(digest: string, operation: () => Promise<T>): Promise<T> {
-    const path = join(this.root, "locks", digest); await mkdir(dirname(path), { recursive: true }); let handle; const ownerStart = await processStart(process.pid);
-    for (let attempt = 0; attempt < 400; attempt++) try { handle = await open(path, "wx", 0o600); await handle.writeFile(JSON.stringify({ pid: process.pid, start: ownerStart, expiresAt: Date.now() + 30_000 })); await handle.sync(); break; }
+    const path = join(this.root, "locks", digest); await mkdir(dirname(path), { recursive: true }); let handle; const ownerStart = await processStart(process.pid); const ownerId = randomUUID();
+    for (let attempt = 0; attempt < 400; attempt++) try { handle = await open(path, "wx", 0o600); await handle.writeFile(JSON.stringify({ ownerId, pid: process.pid, start: ownerStart, expiresAt: Date.now() + 30_000 })); await handle.sync(); break; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt === 399) throw error;
       const lease = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
       if (lease && lease.expiresAt <= Date.now() && !await processOwnerAlive(lease.pid, lease.start)) {
-        const stale = `${path}.stale-${randomUUID()}`; await rename(path, stale).then(() => rm(stale, { force: true }), () => undefined);
+        await recoverStaleLease(path, lease.ownerId);
       } else await new Promise((resolve) => setTimeout(resolve, 5)); }
-    try { return await operation(); } finally { await handle?.close(); await rm(path, { force: true }); }
+    try { return await operation(); } finally { await handle?.close(); const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+      if (current?.ownerId === ownerId) await rm(path, { force: true }); }
   }
   private finalPath(reference: DigestReference): string { return join(this.root, "sha256", reference.sha256.slice(0, 2), reference.sha256); }
   private stagePath(stageId: string): string { if (!/^[a-f0-9-]{36}$/.test(stageId)) throw new TypeError("INVALID_STAGE_ID"); return join(this.root, "staging", stageId); }
@@ -73,4 +74,11 @@ async function processStart(pid: number): Promise<string> {
 }
 async function processOwnerAlive(pid: number, start: string): Promise<boolean> {
   try { process.kill(pid, 0); return await processStart(pid) === start; } catch { return false; }
+}
+async function recoverStaleLease(path: string, expectedOwner: string): Promise<void> {
+  const recovery = `${path}.recovery`; let guard;
+  try { guard = await open(recovery, "wx", 0o600); await guard.writeFile(expectedOwner); const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+    if (current?.ownerId === expectedOwner && current.expiresAt <= Date.now() && !await processOwnerAlive(current.pid, current.start)) await rm(path, { force: true });
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
+  finally { await guard?.close(); if (guard) await rm(recovery, { force: true }); }
 }

@@ -73,12 +73,12 @@ test("concurrent tenant finalization preserves every scope without lost updates"
 });
 
 test("expired lock cannot be stolen from a live owner and recovers after SIGKILL", async () => {
-  const root = await mkdtemp(join(tmpdir(), "cas-kill-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode("kill-recovery"); const ref = reference(bytes);
-  const staged = await cas.stage(bytes, ref, metadata); const lock = join(root, "locks", ref.sha256);
+  const root = await mkdtemp(join(tmpdir(), "cas-kill-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const contender = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode("kill-recovery"); const ref = reference(bytes);
+  const [staged, stagedTwo] = await Promise.all([cas.stage(bytes, ref, metadata), contender.stage(bytes, ref, metadata)]); const lock = join(root, "locks", ref.sha256);
   const child = spawn(process.execPath, [new URL("fixtures/cas-lock-owner.mjs", import.meta.url).pathname, lock], { stdio: ["ignore", "pipe", "inherit"] });
   try {
     await new Promise((resolve) => child.stdout.once("data", resolve));
-    let resolved = false; const pending = cas.finalize(staged).then(() => { resolved = true; }); await new Promise((resolve) => setTimeout(resolve, 100)); assert.equal(resolved, false);
+    let resolved = false; const pending = Promise.all([cas.finalize(staged), contender.finalize(stagedTwo)]).then(() => { resolved = true; }); await new Promise((resolve) => setTimeout(resolve, 100)); assert.equal(resolved, false);
     child.kill("SIGKILL"); await new Promise((resolve) => child.once("exit", resolve));
     await pending; assert.equal(await cas.exists(ref), true);
   } finally { child.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
