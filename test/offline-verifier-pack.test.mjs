@@ -11,6 +11,12 @@ const exec = promisify(execFile);
 test("npm-packed offline verifier installs from cache without repository build paths", { timeout: 120_000 }, async t => {
   const temp = await mkdtemp(join(tmpdir(), "agentics-verifier-pack-")); t.after(() => rm(temp, { recursive: true, force: true }));
   const source = resolve("packages/offline-verifier");
+  // A disconnected installer needs a deliberately seeded, exact release cache.
+  // Root installs may satisfy these packages from platform staging paths without
+  // populating npm's content cache, so seed the three public runtime artifacts
+  // before the network-disabled install assertion.
+  for (const spec of ["@metaharness/flywheel@0.1.10", "@ruvector/rvf@0.2.3", "ruvector@0.2.41"])
+    await exec("npm", ["cache", "add", spec]);
   const packed = JSON.parse((await exec("npm", ["pack", source, "--json", "--pack-destination", temp])).stdout);
   const tarball = join(temp, packed[0].filename); assert.ok(packed[0].files.some(({ path }) => path === "native-rvf-plugin.mjs"));
   await writeFile(join(temp, "package.json"), JSON.stringify({ private: true }));
