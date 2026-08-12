@@ -9,16 +9,33 @@ const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
 const configuration = { connectionString: url, maxConnections: 64, statementTimeoutMs: 10_000, lockTimeoutMs: 2_000 };
 
-function messageEnvelope(seed) {
+function messageEnvelope(seed, tenant = "tenant-a", aggregate = "transport-a", keySeed = 3) {
   const bytes = new TextEncoder().encode(`evidence-${seed}`); const digest = digestBytes(bytes);
   return createEnvelope({ envelopeSchema: "agentics.evolution-envelope/v1", schemaVersion: 1,
-    id: eventId(`0198a41d-2c00-7000-8000-${seed.toString().padStart(12, "0")}`), type: "TransportTested", tenantId: tenantId("tenant-a"),
-    repositoryId: repositoryId("repo-a"), aggregateId: aggregateId("transport-a"), cycleId: cycleId("cycle-a"), actorId: actorId("actor-a"),
+    id: eventId(`0198a41d-2c00-7000-8000-${seed.toString().padStart(12, "0")}`), type: "TransportTested", tenantId: tenantId(tenant),
+    repositoryId: repositoryId("repo-a"), aggregateId: aggregateId(aggregate), cycleId: cycleId("cycle-a"), actorId: actorId("actor-a"),
     occurredAt: utcInstant("2026-08-12T00:00:00.000Z"), causationId: causationId("0198a41d-2c00-7000-8000-100000000001"),
-    correlationId: correlationId("0198a41d-2c00-7000-8000-100000000002"), idempotencyKey: idempotencyKey("0198a41d-2c00-7000-8000-100000000003"),
+    correlationId: correlationId("0198a41d-2c00-7000-8000-100000000002"), idempotencyKey: idempotencyKey(`0198a41d-2c00-7000-8000-${keySeed.toString().padStart(12, "0")}`),
     policyEpoch: 1, sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
-    evidence: [digestReference({ uri: `cas://sha256/${digest}`, sha256: digest })], payload: { tenantId: "tenant-a", repositoryId: "repo-a" } });
+    evidence: [digestReference({ uri: `cas://sha256/${digest}`, sha256: digest })], payload: { tenantId: tenant, repositoryId: "repo-a" } });
 }
+
+test("command idempotency returns the original outcome and rejects digest conflicts", { skip: !url }, async () => {
+  const suffix = `${process.pid}${Date.now()}`.slice(-10); const tenant = `idempotency-${suffix}`;
+  const envelope = messageEnvelope(31, tenant, `aggregate-${suffix}`, 31);
+  const database = new PostgresPersistence(configuration);
+  try {
+    const write = { aggregateType: "idempotency-test", expectedVersion: 0, state: { value: 1 }, event: envelope, topic: "evolution.events.v1" };
+    const first = await database.executeCommand(write); const duplicate = await database.executeCommand(write);
+    assert.equal(first.duplicate, false); assert.equal(duplicate.duplicate, true); assert.equal(duplicate.eventId, first.eventId);
+    await assert.rejects(database.executeCommand({ ...write, state: { value: 2 } }), /IDEMPOTENCY_CONFLICT/);
+    const counts = await database.pool.query(`SELECT
+      (SELECT count(*)::int FROM domain_events WHERE tenant_id=$1) events,
+      (SELECT count(*)::int FROM outbox WHERE tenant_id=$1) outbox,
+      (SELECT count(*)::int FROM command_idempotency WHERE tenant_id=$1) commands`, [tenant]);
+    assert.deepEqual(counts.rows[0], { events: 1, outbox: 1, commands: 1 });
+  } finally { await database.close(); }
+});
 
 test("100 serializable contenders cannot overspend alpha or budget", { skip: !url }, async () => {
   const admin = new Client({ connectionString: url }); await admin.connect(); await admin.query("DELETE FROM critical_resources WHERE tenant_id='tenant-a' AND resource_id IN ('alpha-c','budget-c')"); await admin.end();

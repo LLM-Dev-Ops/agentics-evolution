@@ -91,11 +91,12 @@ jobs:
         with: { node-version: 20.19.5, cache: npm }
       - run: npm install --global npm@10.9.4
       - run: npm ci --omit=optional --ignore-scripts
-      - run: npm run migrate && npm run verify:postgres
-      - run: npm run build && node --test test/postgres-integration.test.mjs test/persistence-concurrency.test.mjs
+      - run: npm run verify:prompt-03
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: prompt-03-postgres-${{ github.sha }}
-          path: reports/prompt-03-postgres.json
+          path: |
+            reports/prompt-03-postgres.json
+            reports/prompt-03-benchmark.json
           if-no-files-found: error
