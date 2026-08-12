@@ -80,11 +80,11 @@ export async function loadAuthorityCatalog(path = "config/upstream-authorities.y
   for (const [index, source] of (catalog?.sourceAuthorities ?? []).entries()) {
     const path = `sourceAuthorities[${index}]`;
     if (!source?.name || !NAME.test(source.name)) failures.push(`${path}.name: invalid`);
-    if (!/^https:\/\/github\.com\/ruvnet\/[A-Za-z0-9._-]+\.git$/.test(source?.repository ?? "")) failures.push(`${path}.repository: unapproved source`);
+    if (!/^https:\/\/github\.com\/(?:ruvnet|LLM-Dev-Ops)\/[A-Za-z0-9._-]+\.git$/.test(source?.repository ?? "")) failures.push(`${path}.repository: unapproved source`);
     if (!/^[a-f0-9]{40}$/.test(source?.commit ?? "")) failures.push(`${path}.commit: expected full commit SHA`);
     if (!/^[a-f0-9]{40}$/.test(source?.sourceTree ?? "")) failures.push(`${path}.sourceTree: expected git tree SHA`);
     if (typeof source?.path !== "string" || source.path.includes("..")) failures.push(`${path}.path: invalid`);
-    if (typeof source?.build !== "string" || !source.build.includes("--locked")) failures.push(`${path}.build: must be locked`);
+    if (typeof source?.build !== "string" || (!source.build.includes("--locked") && !/^npm ci(?:\s|$)/.test(source.build))) failures.push(`${path}.build: must be locked`);
     if (typeof source?.binary !== "string" || source.binary.startsWith("/")) failures.push(`${path}.binary: invalid`);
     nonEmptyStrings(source?.requiredCapabilities, `${path}.requiredCapabilities`, failures);
     const mapped = source?.capabilityTests;
