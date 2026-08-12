@@ -42,6 +42,8 @@ test("actual login role is non-bypass and pooled SET LOCAL tenant state cannot b
       assert.equal((await client.query("SELECT * FROM aggregates WHERE tenant_id=$1", [tenantA])).rowCount, 0);
       assert.equal((await client.query("UPDATE aggregates SET state='{}' WHERE tenant_id=$1 RETURNING aggregate_id", [tenantA])).rowCount, 0);
     });
+    await assert.rejects(database.tenantTransaction(tenantA, "READ COMMITTED", (client) => client.query(
+      "INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state) VALUES($1,'repo-b','pool-agg','test',1,'{}')", [tenantA]).then(() => undefined)), /aggregates_one_repository_per_id/);
     assert.equal((await database.pool.query("SELECT * FROM aggregates WHERE tenant_id=$1", [tenantA])).rowCount, 0, "SET LOCAL must reset on pooled connection release");
   } finally { await database.close(); }
 });
