@@ -2,14 +2,17 @@ import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { sha256 } from "./lib/evidence.mjs";
+import { dependencyPolicyFailures, maintainerPolicyFailures } from "./lib/supply-policy.mjs";
 
 const manifestText = await readFile("package.json", "utf8");
 const lockText = await readFile("package-lock.json", "utf8");
 const npmrc = await readFile(".npmrc", "utf8");
 const catalogText = await readFile("config/upstream-authorities.yaml", "utf8");
+const policyText = await readFile("config/supply-chain-policy.json", "utf8");
 const manifest = JSON.parse(manifestText);
 const lock = JSON.parse(lockText);
 const catalog = parse(catalogText);
+const policy = JSON.parse(policyText);
 const failures = [];
 const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
 const forbiddenLicense = /(?:^|\s|\()(?:AGPL|SSPL|BUSL)(?:-|\s|\)|$)/i;
@@ -51,10 +54,18 @@ for (const [name, version] of Object.entries(dependencies)) {
   const locked = lock.packages?.[`node_modules/${name}`];
   if (!locked?.integrity) failures.push(`${name}: missing lockfile integrity`);
   if (locked?.version !== version) failures.push(`${name}: manifest/lock version mismatch`);
+  failures.push(...dependencyPolicyFailures(name, locked, policy));
 }
 for (const authority of catalog.authorities) {
   if (manifest.dependencies?.[authority.package] !== String(authority.version))
     failures.push(`${authority.package}: authority catalog version mismatch`);
+  try {
+    const output = execFileSync("npm", ["view", `${authority.package}@${authority.version}`, "maintainers", "--json"], { encoding: "utf8" });
+    const maintainers = JSON.parse(output);
+    failures.push(...maintainerPolicyFailures(authority.package, Array.isArray(maintainers) ? maintainers : [maintainers], policy));
+  } catch (error) {
+    failures.push(`${authority.package}: unable to verify registry maintainers: ${error.message}`);
+  }
 }
 
 let audit;

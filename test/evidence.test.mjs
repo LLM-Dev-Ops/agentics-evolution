@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createSigner, signEnvelope, verifyEnvelope } from "../scripts/lib/evidence.mjs";
+import { createSigner, requireTrustedPublicKey, signEnvelope, validateSlsaV1, verifyEnvelope } from "../scripts/lib/evidence.mjs";
 
 test("signed provenance envelope round trips", () => {
   const statement = { schemaVersion: "agentics.provenance/v1", source: { commit: "abc123" }, subjects: [] };
@@ -22,4 +22,15 @@ test("untrusted signing key is rejected", () => {
   const envelope = signEnvelope({ approved: true }, createSigner());
   const otherKey = createSigner().publicKey.export({ type: "spki", format: "pem" });
   assert.throws(() => verifyEnvelope(envelope, otherKey), /not trusted/);
+});
+
+test("production verification fails closed without a separately trusted key", () => {
+  assert.throws(() => requireTrustedPublicKey(undefined, "production", "embedded"), /separately trusted/);
+  assert.equal(requireTrustedPublicKey("configured", "production", "embedded"), "configured");
+  assert.equal(requireTrustedPublicKey(undefined, "test", "embedded"), "embedded");
+});
+
+test("mislabeled provenance without SLSA v1 fields is rejected", () => {
+  assert.throws(() => validateSlsaV1({ predicateType: "https://slsa.dev/provenance/v1" }), /in-toto/);
+  assert.throws(() => validateSlsaV1({ _type: "https://in-toto.io/Statement/v1", predicateType: "https://slsa.dev/provenance/v1", subject: [] }), /subjects/);
 });

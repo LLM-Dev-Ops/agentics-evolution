@@ -44,3 +44,18 @@ export function verifyEnvelope(envelope, trustedPublicKeyPem) {
   if (!valid) throw new Error("evidence signature verification failed");
   return JSON.parse(payload.toString("utf8"));
 }
+
+export function requireTrustedPublicKey(configuredKey, mode, embeddedKey) {
+  if (configuredKey) return configuredKey;
+  if (["development", "test"].includes(mode)) return embeddedKey;
+  throw new Error("production verification requires separately trusted public key");
+}
+
+export function validateSlsaV1(statement) {
+  if (statement?._type !== "https://in-toto.io/Statement/v1") throw new Error("in-toto Statement v1 required");
+  if (statement.predicateType !== "https://slsa.dev/provenance/v1") throw new Error("SLSA provenance v1 required");
+  if (!Array.isArray(statement.subject) || statement.subject.length === 0) throw new Error("SLSA subjects required");
+  if (!statement.predicate?.buildDefinition?.buildType || !statement.predicate?.runDetails?.builder?.id)
+    throw new Error("SLSA buildDefinition and runDetails required");
+  return statement;
+}

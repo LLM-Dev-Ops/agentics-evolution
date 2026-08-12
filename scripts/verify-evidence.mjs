@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
-import { sha256, verifyEnvelope } from "./lib/evidence.mjs";
+import { requireTrustedPublicKey, sha256, validateSlsaV1, verifyEnvelope } from "./lib/evidence.mjs";
 
 const envelope = JSON.parse(await readFile(process.argv[2] ?? "reports/provenance.signed.json", "utf8"));
-const statement = verifyEnvelope(envelope, process.env.AGENTICS_RELEASE_PUBLIC_KEY);
-if (statement.schemaVersion !== "agentics.provenance/v1") throw new Error("unsupported provenance statement");
-for (const subject of statement.subjects) {
-  const actual = sha256(await readFile(subject.path));
-  if (actual !== subject.sha256) throw new Error(`${subject.path}: digest does not match signed provenance`);
+const mode = process.env.AGENTICS_EVIDENCE_MODE ?? "production";
+const trustedKey = requireTrustedPublicKey(process.env.AGENTICS_RELEASE_PUBLIC_KEY, mode, envelope.publicKey);
+const statement = validateSlsaV1(verifyEnvelope(envelope, trustedKey));
+for (const subject of statement.subject) {
+  const actual = sha256(await readFile(subject.name));
+  if (actual !== subject.digest?.sha256) throw new Error(`${subject.name}: digest does not match signed provenance`);
 }
-console.log(`verified ${statement.subjects.length} evidence subjects for ${statement.source.commit}`);
+const commit = statement.predicate.buildDefinition.externalParameters.source.digest.gitCommit;
+console.log(`verified ${statement.subject.length} evidence subjects for ${commit}`);

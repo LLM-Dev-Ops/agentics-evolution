@@ -6,7 +6,7 @@ const envelope = JSON.parse(await readFile("reports/provenance.signed.json", "ut
 const rounds = 250;
 const started = performance.now();
 for (let index = 0; index < rounds; index += 1) {
-  const statement = verifyEnvelope(envelope);
+  const statement = verifyEnvelope(envelope, envelope.publicKey);
   sha256(canonicalJson(statement));
 }
 const elapsedMs = performance.now() - started;
