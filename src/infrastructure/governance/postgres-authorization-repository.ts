@@ -6,7 +6,7 @@ import type { AuthorizationRequest, PromotionAuthorization } from "../../context
 import { approveAuthorization, requestAuthorization } from "../../contexts/governance/domain/authorization.js";
 import type { CapabilityEnvelope } from "../../contexts/governance/domain/capability.js";
 import { moneyFromWire } from "../../shared-kernel/money.js";
-import type { BoundApprovalDecision, BoundApprovalStore } from "../../contexts/governance/application/verified-approval.js";
+import { requireVerifiedApproval, type BoundApprovalDecision, type BoundApprovalStore, type VerifiedApproval } from "../../contexts/governance/application/verified-approval.js";
 
 export class PostgresAuthorizationRepository implements BoundApprovalStore {
  constructor(readonly database: PostgresPersistence) {}
@@ -18,7 +18,7 @@ export class PostgresAuthorizationRepository implements BoundApprovalStore {
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'REQUESTED',$11,$12)`,[tenantId,repositoryId,input.id,input.requester,input.candidateDigest,input.evidenceDigest,input.environment,input.expectedChampionVersion,input.policyEpoch,wire(input.envelope),input.expiresAt,input.maxUses]);
    await this.event(client,tenantId,input.id,0,"PromotionAuthorizationRequested",input.requester,{repositoryId}); await client.query("INSERT INTO governance_idempotency VALUES($1,$2,$3,$4)",[tenantId,idempotencyKey,requestDigest,wireState]);return state;});
  }
- async approveBound(tenantId:string,id:string,approver:string,envelope:CapabilityEnvelope,binding:BoundApprovalDecision):Promise<void>{await this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{
+ async approveBound(tenantId:string,id:string,approver:string,envelope:CapabilityEnvelope,approval:VerifiedApproval):Promise<void>{requireVerifiedApproval(approval);const binding=approval.decision;if(approval.approverSubject!==approver)throw new TypeError("APPROVAL_SUBJECT_BINDING_REJECTED");await this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{
   const row=await this.lock(client,tenantId,id); const domain=this.hydrate(row); const next=approveAuthorization(domain,approver,envelope);
   if(binding.scope.tenantId!==tenantId||binding.scope.repositoryId!==row.repository_id||binding.scope.action!=="promotion.authorize"||binding.policyEpoch!==row.policy_epoch||binding.evidenceDigest!==row.evidence_digest)throw new TypeError("APPROVAL_BINDING_CONFLICT");
   const updated=await client.query("UPDATE governance_authorizations SET state='APPROVED',approver=$3,approved_envelope=$4,approved_binding=$5,version=version+1,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND authorization_id=$2 AND state='REQUESTED' AND transaction_timestamp()<expires_at RETURNING version",[tenantId,id,approver,wire(next.approvedEnvelope),binding]);

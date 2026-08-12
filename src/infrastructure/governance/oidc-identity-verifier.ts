@@ -3,7 +3,7 @@ import { tenantId } from "../../shared-kernel/identity.js";
 import type { IdentityVerifier, VerifiedIdentity } from "../../contexts/governance/application/identity.js";
 
 export interface OidcSubjectMapping { readonly kind: "HUMAN" | "SERVICE"; readonly tenantId: string; readonly groups?: readonly string[]; readonly serviceAccount?: string; readonly requireMfa?: boolean; }
-export interface OidcIssuerTrust { readonly issuer: string; readonly audiences: readonly string[]; readonly algorithms: readonly ["EdDSA", ..."EdDSA"[]];
+export interface OidcIssuerTrust { readonly issuer: string; readonly audiences: readonly string[]; readonly algorithms: readonly [("EdDSA"|"RS256"), ...("EdDSA"|"RS256")[]];
   readonly keys: Readonly<Record<string, string>>; readonly subjects: Readonly<Record<string, OidcSubjectMapping>>; readonly maximumTokenAgeSeconds: number; readonly clockSkewSeconds: number; }
 type Claims = { iss?: unknown; sub?: unknown; aud?: unknown; exp?: unknown; nbf?: unknown; iat?: unknown; amr?: unknown; acr?: unknown; email?: unknown };
 
@@ -14,11 +14,11 @@ export class CryptographicOidcIdentityVerifier implements IdentityVerifier {
   async verify(token: string, expectedAudience: string): Promise<VerifiedIdentity> {
     if (token.length > 16_384) throw new TypeError("OIDC_TOKEN_TOO_LARGE"); const parts = token.split("."); if (parts.length !== 3) throw new TypeError("OIDC_TOKEN_MALFORMED");
     const header = json(parts[0]!, "OIDC_HEADER_INVALID") as { alg?: unknown; kid?: unknown; typ?: unknown }; const claims = json(parts[1]!, "OIDC_CLAIMS_INVALID") as Claims;
-    if (header.alg !== "EdDSA" || typeof header.kid !== "string" || (header.typ !== undefined && header.typ !== "JWT")) throw new TypeError("OIDC_ALGORITHM_OR_KEY_REJECTED");
+    if ((header.alg !== "EdDSA"&&header.alg!=="RS256") || typeof header.kid !== "string" || (header.typ !== undefined && header.typ !== "JWT")) throw new TypeError("OIDC_ALGORITHM_OR_KEY_REJECTED");
     const trust = this.trusts.find(({ issuer }) => issuer === claims.iss); if (!trust || !trust.algorithms.includes(header.alg)) throw new TypeError("OIDC_ISSUER_REJECTED");
     if (!trust.audiences.includes(expectedAudience) || !audiences(claims.aud).includes(expectedAudience)) throw new TypeError("OIDC_AUDIENCE_REJECTED");
     const publicKeyPem = trust.keys[header.kid]; if (!publicKeyPem) throw new TypeError("OIDC_KEY_REJECTED"); const key = createPublicKey(publicKeyPem);
-    if (key.asymmetricKeyType !== "ed25519" || !verify(null, Buffer.from(`${parts[0]}.${parts[1]}`), key, Buffer.from(parts[2]!, "base64url"))) throw new TypeError("OIDC_SIGNATURE_INVALID");
+    const valid=header.alg==="EdDSA"?key.asymmetricKeyType==="ed25519"&&verify(null,Buffer.from(`${parts[0]}.${parts[1]}`),key,Buffer.from(parts[2]!,"base64url")):key.asymmetricKeyType==="rsa"&&verify("RSA-SHA256",Buffer.from(`${parts[0]}.${parts[1]}`),key,Buffer.from(parts[2]!,"base64url"));if(!valid)throw new TypeError("OIDC_SIGNATURE_INVALID");
     const now = Math.floor(this.now() / 1000); const skew = trust.clockSkewSeconds; const exp = integer(claims.exp); const nbf = integer(claims.nbf); const iat = integer(claims.iat);
     if (exp < now - skew || nbf > now + skew || iat > now + skew || now - iat > trust.maximumTokenAgeSeconds + skew || exp <= iat) throw new TypeError("OIDC_TOKEN_TIME_REJECTED");
     if (typeof claims.sub !== "string") throw new TypeError("OIDC_SUBJECT_REJECTED"); const mapping = trust.subjects[claims.sub]; if (!mapping) throw new TypeError("OIDC_SUBJECT_REJECTED");

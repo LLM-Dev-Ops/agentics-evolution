@@ -9,8 +9,12 @@ export interface BoundApprovalDecision { readonly schema: "agentics.governance-d
 export interface ApprovalRecord { readonly authorizationId: string; readonly requesterSubject: string; readonly candidateDigest: string;
   readonly evidenceDigest: string; readonly policyEpoch: string; readonly envelope: CapabilityEnvelope; }
 export interface ApprovalEvidencePort { verify(decision: BoundApprovalDecision): Promise<boolean>; }
+declare const verifiedApprovalBrand: unique symbol;
+export interface VerifiedApproval { readonly decision: BoundApprovalDecision; readonly approverSubject: string; readonly [verifiedApprovalBrand]: true; }
+const mintedApprovals = new WeakSet<object>();
+export function requireVerifiedApproval(value: VerifiedApproval): void { if(!value||!mintedApprovals.has(value as object))throw new TypeError("VERIFIED_APPROVAL_REQUIRED"); }
 export interface BoundApprovalStore { approveBound(tenantId: string, authorizationId: string, approverSubject: string,
-  envelope: CapabilityEnvelope, decision: BoundApprovalDecision): Promise<void>; }
+  envelope: CapabilityEnvelope, approval: VerifiedApproval): Promise<void>; }
 
 export const canonicalIdentitySubject = (identity: Pick<VerifiedIdentity, "issuer" | "subject">): string =>
   `${identity.issuer.normalize("NFC")}#${identity.subject.normalize("NFC")}`;
@@ -30,7 +34,8 @@ export class VerifiedApprovalAuthority {
       decision.policyEpoch !== record.policyEpoch || decision.evidenceDigest !== record.evidenceDigest ||
       decision.decisionDigest !== decisionDigest(decision)) throw new TypeError("APPROVAL_DECISION_BINDING_REJECTED");
     if (!await this.evidence.verify(decision)) throw new TypeError("APPROVAL_EVIDENCE_REJECTED");
-    await this.store.approveBound(decision.scope.tenantId, record.authorizationId, subject, record.envelope, decision);
+    const approval=Object.freeze({decision,approverSubject:subject}) as VerifiedApproval;mintedApprovals.add(approval);
+    await this.store.approveBound(decision.scope.tenantId, record.authorizationId, subject, record.envelope, approval);
   }
 }
 
