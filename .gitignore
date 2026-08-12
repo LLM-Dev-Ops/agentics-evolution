@@ -7,9 +7,8 @@ reports/*.txt
 
 # Codex local configuration
 .codex/
-# Claude Flow runtime data
-.claude-flow/data/
-.claude-flow/logs/
+# Ruflo runtime state is local evidence, never source.
+.claude-flow/
 # Environment variables
 .env
 .env.local

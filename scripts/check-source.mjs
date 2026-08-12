@@ -12,7 +12,7 @@ const normalized = (path) => path.split(sep).join("/");
 const rel = (path) => normalized(relative(root, path));
 const exemptions = new Map(policy.generatedExemptions.map((item) => [item.path, item.reason]));
 const sourceExtensions = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".mjs", ".cjs"]);
-const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage", ".ruflo"]);
+const ignoredDirectories = new Set([".git", "node_modules", "dist", "coverage", ".ruflo", ".claude-flow", "reports"]);
 
 function extension(path) { return path.match(/\.[^.\/]+$/)?.[0] ?? ""; }
 async function filesUnder(path) {
