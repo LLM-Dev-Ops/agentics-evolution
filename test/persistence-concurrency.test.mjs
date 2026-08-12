@@ -7,7 +7,7 @@ import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
   withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES,
-  ReplayCapabilityVerifier, replayEffectPolicy, canonicalJson
+  ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, canonicalJson
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -98,6 +98,19 @@ test("replay is dry-run by default and live effects require signed scoped capabi
   assert.throws(() => replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-14T00:00:00.000Z")), /REPLAY_CAPABILITY_EXPIRED/);
   const altered = new TextEncoder().encode(canonicalJson({ ...statement, tenantId: "tenant-b" }));
   assert.throws(() => verifier.verify(altered, sign(null, bytes, privateKey)), /UNTRUSTED_REPLAY_CAPABILITY/);
+});
+
+test("replay transport uses an isolated topic and effect metadata", { skip: !url }, async () => {
+  const database = new PostgresPersistence(configuration); const local = new PostgresLocalTransport(database); const replay = new ReplayTransport(local);
+  const envelope = messageEnvelope(37); const policy = replayEffectPolicy("DRY_RUN", envelope);
+  try {
+    await database.tenantTransaction("tenant-a", "READ COMMITTED", (client) => client.query("DELETE FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=$1", [envelope.id]).then(() => undefined));
+    await replay.publish({ envelope, orderingKey: "tenant-a/repo-a/transport-a", attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } }, policy);
+    assert.equal((await local.pull("tenant-a", "evolution.events.v1")).some((item) => item.message.envelope.id === envelope.id), false);
+    const deliveries = await replay.pull("tenant-a"); const delivery = deliveries.find((item) => item.message.envelope.id === envelope.id); assert.ok(delivery);
+    assert.equal(delivery.message.attributes.replay, "true"); assert.equal(delivery.message.attributes.effectMode, "DRY_RUN"); assert.equal(delivery.message.attributes.replayId, "dry-run");
+    await local.ack("tenant-a", delivery.messageId, delivery.leaseToken);
+  } finally { await database.close(); }
 });
 
 test("authorization consumption and champion CAS have one winner", { skip: !url }, async () => {

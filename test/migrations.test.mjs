@@ -31,7 +31,7 @@ test("every release migration survives interruption and rejects checksum drift",
   try {
     await admin.query(`CREATE DATABASE ${databaseName}`);
     const databaseUrl = new URL(url); databaseUrl.pathname = `/${databaseName}`;
-    for (let version = 1; version <= 7; version++) {
+    for (let version = 1; version <= 8; version++) {
       const prior = migrate(databaseUrl.toString(), { AGENTICS_MIGRATION_MAX_VERSION: String(version - 1) }); assert.equal(prior.status, 0, prior.stderr);
       await interruptAfterSql(databaseUrl.toString(), version);
       const resumed = migrate(databaseUrl.toString(), { AGENTICS_MIGRATION_MAX_VERSION: String(version) }); assert.equal(resumed.status, 0, resumed.stderr);

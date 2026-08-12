@@ -1,6 +1,8 @@
 import { createPublicKey, verify } from "node:crypto";
 import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
 import { canonicalJson, deepFreeze } from "../shared-kernel/immutable.js";
+import type { PostgresLocalTransport } from "./postgres-local-transport.js";
+import type { TransportMessage } from "./transport.js";
 
 const replayCapabilityBrand: unique symbol = Symbol("VerifiedReplayCapability");
 export interface ReplayCapabilityStatement { readonly schema: "agentics.replay-capability/v1"; readonly replayId: string; readonly issuer: string;
@@ -40,4 +42,15 @@ export function replayEffectPolicy(mode: "DRY_RUN" | "LIVE", envelope: Evolution
   if (Date.parse(scope.expiresAt) <= nowMs) throw new TypeError("REPLAY_CAPABILITY_EXPIRED");
   return deepFreeze({ replay: true, replayId: scope.replayId, allowExternalEffects: true, allowNormalTopicPublish: false,
     tenantId: envelope.tenantId, repositoryId: envelope.repositoryId });
+}
+
+export class ReplayTransport {
+  constructor(readonly transport: PostgresLocalTransport, readonly topic = "evolution.replay.v1") {}
+  async publish(message: TransportMessage, policy: ReplayEffectPolicy): Promise<{ messageId: string }> {
+    if (!policy.replay || policy.tenantId !== message.envelope.tenantId || policy.repositoryId !== message.envelope.repositoryId) throw new TypeError("REPLAY_POLICY_SCOPE_MISMATCH");
+    const replayMessage = { ...message, attributes: { ...message.attributes, replay: "true", replayId: policy.replayId,
+      effectMode: policy.allowExternalEffects ? "LIVE_SCOPED" : "DRY_RUN" } };
+    return this.transport.publish(this.topic, replayMessage);
+  }
+  pull(tenantId: string, limit = 10) { return this.transport.pull(tenantId, this.topic, limit); }
 }

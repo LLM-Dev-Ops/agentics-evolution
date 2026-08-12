@@ -7,6 +7,7 @@ export class PostgresLocalTransport implements EventTransport {
   constructor(readonly database: PostgresPersistence) {}
   async publish(topic: string, message: TransportMessage): Promise<PublishReceipt> {
     validateTransportMessage(message);
+    if (!["evolution.commands.v1", "evolution.events.v1", "evolution.deadletter.v1", "evolution.replay.v1"].includes(topic)) throw new TypeError("INVALID_TOPIC");
     const messageId = newEventId();
     await this.database.tenantTransaction(message.envelope.tenantId, "READ COMMITTED", (client) => client.query(
       `INSERT INTO local_transport_messages(tenant_id,message_id,event_id,topic,ordering_key,envelope,attributes)
