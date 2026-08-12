@@ -3,3 +3,13 @@ dist/
 reports/*.json
 !reports/.gitkeep
 *.log
+
+# Codex local configuration
+.codex/
+# Claude Flow runtime data
+.claude-flow/data/
+.claude-flow/logs/
+# Environment variables
+.env
+.env.local
+.env.*.local
