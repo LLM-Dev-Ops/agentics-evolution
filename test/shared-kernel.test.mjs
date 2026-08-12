@@ -59,6 +59,9 @@ test("identity, digest, UTC, money, and snapshot parsers fail closed", () => {
   assert.deepEqual(moneyFromWire(moneyToWire(money(12345678901234567890n, "USD"))), money(12345678901234567890n, "USD"));
   assert.throws(() => money(-1n, "USD"));
   assert.throws(() => sourceSnapshot({ commit: "not-a-commit", dirtySnapshot: null }));
+  assert.throws(() => sourceSnapshot({ objectFormat: "sha256", commit: "a".repeat(40), dirtySnapshot: null }), /object format/);
+  assert.throws(() => money(1n, "ZZZ"), /supported ISO/);
+  assert.throws(() => money(10n ** 24n + 1n, "USD"), /range/);
 });
 
 test("trust transition property exhaustively permits only the four evidenced edges", () => {

@@ -1,10 +1,11 @@
 export type Currency = string & { readonly __currency: unique symbol };
 export interface Money { readonly minorUnits: bigint; readonly currency: Currency; }
 const CURRENCY = /^[A-Z]{3}$/;
+const SUPPORTED_CURRENCIES = new Set(["AUD", "CAD", "CHF", "CNY", "EUR", "GBP", "INR", "JPY", "KRW", "USD"]);
 const MAX_MINOR_UNITS = 10n ** 24n;
 
 export function currency(value: string): Currency {
-  if (!CURRENCY.test(value)) throw new TypeError("currency must be a three-letter uppercase ISO code");
+  if (!CURRENCY.test(value) || !SUPPORTED_CURRENCIES.has(value)) throw new TypeError("currency is not in the supported ISO 4217 catalog");
   return value as Currency;
 }
 
