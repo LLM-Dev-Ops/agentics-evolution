@@ -11,7 +11,9 @@ export interface BoundApprovalDecision { readonly schema: "agentics.governance-d
 export interface ApprovalRecord { readonly authorizationId: string; readonly requesterSubject: string; readonly candidateDigest: string;
   readonly evidenceDigest: string; readonly policyEpoch: string; readonly envelope: CapabilityEnvelope;readonly expiresAt:string;readonly maxUses:number; }
 const promotionVerifiers=new WeakSet<object>();
-export class Ed25519PromotionApprovalVerifier{readonly #keys:ReadonlyMap<string,ReturnType<typeof createPublicKey>>;constructor(roots:Readonly<Record<string,string>>){const entries=Object.entries(roots).map(([id,pem])=>[id,createPublicKey(pem)]as const);if(!entries.length||entries.some(([,key])=>key.asymmetricKeyType!=="ed25519"))throw new TypeError("PROMOTION_APPROVAL_TRUST_ROOT_REQUIRED");this.#keys=new Map(entries);promotionVerifiers.add(this);Object.freeze(this);}verify(decision:BoundApprovalDecision):boolean{const key=this.#keys.get(decision.keyId);if(!key)return false;const{signature,...payload}=decision;return verify(null,Buffer.from(canonicalJson(payload)),key,Buffer.from(signature,"base64url"));}}
+const promotionKeys=new WeakMap<object,ReadonlyMap<string,ReturnType<typeof createPublicKey>>>();
+export class Ed25519PromotionApprovalVerifier{constructor(roots:Readonly<Record<string,string>>){const entries=Object.entries(roots).map(([id,pem])=>[id,createPublicKey(pem)]as const);if(!entries.length||entries.some(([,key])=>key.asymmetricKeyType!=="ed25519"))throw new TypeError("PROMOTION_APPROVAL_TRUST_ROOT_REQUIRED");promotionKeys.set(this,new Map(entries));promotionVerifiers.add(this);Object.freeze(this);}verify(decision:BoundApprovalDecision):boolean{return verifyPromotion(this,decision);}}
+function verifyPromotion(owner:object,decision:BoundApprovalDecision):boolean{const key=promotionKeys.get(owner)?.get(decision.keyId);if(!key)return false;const{signature,...payload}=decision;return verify(null,Buffer.from(canonicalJson(payload)),key,Buffer.from(signature,"base64url"));}
 declare const verifiedApprovalBrand: unique symbol;
 export interface VerifiedApproval { readonly decision: BoundApprovalDecision; readonly approverSubject: string; readonly [verifiedApprovalBrand]: true; }
 const mintedApprovals = new WeakSet<object>();
@@ -38,7 +40,7 @@ export class VerifiedApprovalAuthority {
       decision.policyEpoch !== record.policyEpoch || decision.evidenceDigest !== record.evidenceDigest ||
       decision.authorizationId!==record.authorizationId||decision.candidateDigest!==record.candidateDigest||decision.approvedEnvelopeDigest!==capabilityEnvelopeDigest(record.envelope)||decision.expiresAt!==record.expiresAt||decision.maxUses!==record.maxUses||
       decision.decisionDigest !== decisionDigest(decision)) throw new TypeError("APPROVAL_DECISION_BINDING_REJECTED");
-    if (!this.evidence.verify(decision)) throw new TypeError("APPROVAL_EVIDENCE_REJECTED");
+    if (!verifyPromotion(this.evidence,decision)) throw new TypeError("APPROVAL_EVIDENCE_REJECTED");
     const approval=Object.freeze({decision,approverSubject:subject}) as VerifiedApproval;mintedApprovals.add(approval);
     await this.store.approveBound(decision.scope.tenantId, record.authorizationId, subject, record.envelope, approval);
   }
