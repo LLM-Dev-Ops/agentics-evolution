@@ -1,0 +1,17 @@
+schemaVersion: agentics.upstream-authorities/v1
+node: 20.19.5
+authorities:
+  - { name: ruflo, package: ruflo, version: 3.38.0, adapter: infrastructure/upstream-ruflo, capabilities: [swarm, hooks, workers, memory, reasoning-bank, nightly-learner] }
+  - { name: metaharness, package: metaharness, version: 0.4.5, adapter: infrastructure/upstream-metaharness, capabilities: [analyze, scaffold, hosts] }
+  - { name: darwin, package: "@metaharness/darwin", version: 0.9.1, adapter: infrastructure/upstream-darwin, capabilities: [evolve, inspectVariant, validateGeneratedCode] }
+  - { name: flywheel, package: "@metaharness/flywheel", version: 0.1.10, adapter: infrastructure/upstream-flywheel, capabilities: [gate, signer, receipt, lineage, replay] }
+  - { name: redblue, package: "@metaharness/redblue", version: 0.1.4, adapter: infrastructure/upstream-redblue, capabilities: [safety, baseline, retest, report] }
+  - { name: turn-credit, package: "@metaharness/turn-credit", version: 0.1.0, adapter: infrastructure/upstream-turn-credit, capabilities: [trajectory, credit, receipt] }
+  - { name: router, package: "@metaharness/router", version: 0.4.0, adapter: infrastructure/upstream-router, capabilities: [route, calibration, train] }
+  - { name: harness, package: "@metaharness/harness", version: 0.2.0, adapter: infrastructure/upstream-harness, capabilities: [kernel, verifier, recovery] }
+  - { name: ruvector, package: ruvector, version: 0.2.41, adapter: infrastructure/upstream-ruvector, capabilities: [native, rvf, sona] }
+hosts:
+  - { package: "@metaharness/host-claude-code", version: 0.1.2 }
+  - { package: "@metaharness/host-codex", version: 0.1.2 }
+knownUnavailable:
+  - { host: prime-agent, reason: "Advertised by MetaHarness HOSTS but not published on npm as of 2026-08-12" }
