@@ -1,10 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
+import { PubSub } from "@google-cloud/pubsub";
 import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
-  withSerializableRetry
+  withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -89,4 +90,21 @@ test("durable local transport supports at-least-once nack/redelivery and fenced 
     await transport.ack("tenant-a", second[0].messageId, second[0].leaseToken);
     assert.equal((await transport.pull("tenant-a", "evolution.events.v1")).length, 0);
   } finally { await database.close(); }
+});
+
+test("Pub/Sub emulator uses the same validated message contract and redelivers nack", { skip: !process.env.PUBSUB_EMULATOR_HOST }, async () => {
+  const projectId = "agentics-test"; const client = new PubSub({ projectId });
+  const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const subscriptionName = `agentics-events-${suffix}`;
+  const [topic] = await client.createTopic(topicName); await topic.createSubscription(subscriptionName, { ackDeadlineSeconds: 10 });
+  const envelope = messageEnvelope(41); const message = { envelope, orderingKey: "tenant-a/repo-a/transport-a",
+    attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } };
+  const publisher = new GooglePubSubTransport(client);
+  const consumer = new GooglePubSubConsumer(client, (bytes, attributes, orderingKey) => ({
+    envelope: JSON.parse(new TextDecoder().decode(bytes)), orderingKey, attributes
+  }));
+  try {
+    const receipt = await publisher.publish(topicName, message); assert.ok(receipt.messageId);
+    const first = await consumer.receiveOne(subscriptionName); assert.equal(first.message.envelope.id, envelope.id); assert.equal(first.message.orderingKey, message.orderingKey); first.nack();
+    const second = await consumer.receiveOne(subscriptionName); assert.equal(second.messageId, first.messageId); second.ack();
+  } finally { await client.subscription(subscriptionName).delete().catch(() => undefined); await topic.delete().catch(() => undefined); await client.close(); }
 });
