@@ -55,7 +55,7 @@ test("broker acceptance before delivery mark may republish but inbox applies one
   try {
     const relay = new OutboxRelay(database, transport);
     await assert.rejects(relay.drain(tenant), /BROKER_ACCEPTED_ACK_LOST/);
-    await database.pool.query("UPDATE outbox SET lease_expires_at=transaction_timestamp()-interval '1 second' WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+    await database.pool.query("UPDATE outbox SET lease_expires_at=transaction_timestamp()-interval '1 second',next_attempt_at=transaction_timestamp() WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
     assert.equal(await relay.drain(tenant), 1);
     assert.equal(physical.length, 2, "physical duplicate is expected at the acknowledgement boundary");
     let effects = 0;
@@ -66,5 +66,24 @@ test("broker acceptance before delivery mark may republish but inbox applies one
     await assert.rejects(consumeOnce(database, tenant, "crash-consumer", altered, async () => ++effects), /INBOX_EVENT_DIGEST_CONFLICT/);
     await assert.rejects(consumeOnce(database, "foreign-tenant", "crash-consumer", physical[1].envelope, async () => ++effects), /EVENT_TENANT_MISMATCH/);
     assert.equal(effects, 1);
+  } finally { await database.close(); }
+});
+
+test("terminal publish failure is attributable and requires authorization to redrive", { skip: !url }, async () => {
+  const tenant = `dead-letter-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000024";
+  await killAt("after-commit", "COMMITTED", tenant, eventId);
+  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  try {
+    const failing = new OutboxRelay(database, { publish: async () => { throw new Error("BROKER_UNAVAILABLE"); } }, 1);
+    await assert.rejects(failing.drain(tenant), /BROKER_UNAVAILABLE/);
+    const dead = await database.pool.query("SELECT reason_code,source_topic,repository_id,aggregate_id,attempts,redrive_count FROM dead_letters WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+    assert.equal(dead.rowCount, 1); assert.deepEqual(dead.rows[0], { reason_code: "PUBLISH_EXHAUSTED", source_topic: "evolution.events.v1",
+      repository_id: "repo-crash", aggregate_id: "aggregate-crash", attempts: 1, redrive_count: 0 });
+    await assert.rejects(failing.redrive(tenant, eventId, false), /REDRIVE_AUTHORIZATION_REQUIRED/);
+    await failing.redrive(tenant, eventId, true);
+    const successful = new OutboxRelay(database, { publish: async () => ({ messageId: "broker-redrive" }) });
+    assert.equal(await successful.drain(tenant), 1);
+    const audited = await database.pool.query("SELECT redrive_count,redriven_at FROM dead_letters WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+    assert.equal(audited.rows[0].redrive_count, 1); assert.ok(audited.rows[0].redriven_at);
   } finally { await database.close(); }
 });
