@@ -13,7 +13,7 @@ const run = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...fil
 });
 await mkdir("reports", { recursive: true });
 const tap=`${run.stdout}${run.stderr}`;await writeFile("reports/tests.tap.txt",tap);
-let semantics;try{semantics=validateTapEvidence(parseTapEvidence(tap));}catch(error){semantics={validationError:error instanceof Error?error.message:String(error)};}
+let semantics;try{semantics=validateTapEvidence(parseTapEvidence(tap),[],{allowDirectives:!selected});}catch(error){semantics={validationError:error instanceof Error?error.message:String(error)};}
 await writeFile("reports/test-execution.json", `${JSON.stringify({ schema:"agentics.test-execution/v2",files,status:run.status,semantics,executedAt:new Date().toISOString() },null,2)}\n`);
 process.stdout.write(run.stdout);
 process.stderr.write(run.stderr);
