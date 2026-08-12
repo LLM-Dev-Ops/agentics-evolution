@@ -17,6 +17,12 @@ export class PostgresPersistence {
     this.#statementTimeoutMs = config.statementTimeoutMs; this.#lockTimeoutMs = config.lockTimeoutMs;
   }
   async close(): Promise<void> { await this.pool.end(); }
+  async verifyRuntimeSafety(): Promise<void> {
+    const result = await this.pool.query(`SELECT r.rolsuper,r.rolbypassrls,pg_has_role(current_user,'agentics_app','member') AS app_member
+      FROM pg_roles r WHERE r.rolname=current_user`);
+    const role = result.rows[0];
+    if (!role || role.rolsuper || role.rolbypassrls || !role.app_member) throw new Error("UNSAFE_POSTGRES_RUNTIME_ROLE");
+  }
   async tenantTransaction<T>(tenant: string, isolation: "READ COMMITTED" | "SERIALIZABLE", operation: (client: pg.PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
