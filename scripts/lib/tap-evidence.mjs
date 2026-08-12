@@ -1,7 +1,7 @@
 const summaryKeys=["tests","pass","fail","cancelled","skipped","todo"];
 export function parseTapEvidence(tap){
  const summary=Object.fromEntries(summaryKeys.map(key=>{const matches=[...tap.matchAll(new RegExp(`^# ${key} (\\d+)$`,"gm"))];const match=matches.at(-1);if(!match)throw new Error(`TAP_SUMMARY_MISSING:${key}`);return[key,Number(match[1])];}));
- const passedSubtests=[];for(const match of tap.matchAll(/^ok \d+ - (.+)$/gm)){const name=match[1].replace(/ # SKIP.*$/,"").replace(/ # TODO.*$/,"/").trim();if(!/# (?:SKIP|TODO)/.test(match[0]))passedSubtests.push(name);}
+ const passedSubtests=[];for(const match of tap.matchAll(/^\s*ok \d+ - (.+)$/gm)){const name=match[1].replace(/ # SKIP.*$/,"").replace(/ # TODO.*$/,"/").trim();if(!/# (?:SKIP|TODO)/.test(match[0]))passedSubtests.push(name);}
  const nestedNonPass=/^\s+(?:not ok \d+|ok \d+.*# (?:SKIP|TODO))/m.test(tap);return Object.freeze({summary:Object.freeze(summary),passedSubtests:Object.freeze(passedSubtests),nestedNonPass});
 }
 export function validateTapEvidence(evidence,requiredSubtests=[]){
