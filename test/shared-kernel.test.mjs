@@ -15,7 +15,7 @@ const authorities = ["Dream", "Darwin", "Flywheel", "Governance"];
 const authorityKeys = generateKeyPairSync("ed25519");
 const authorityVerifier = new Ed25519AuthorityEvidenceVerifier(authorities.map((authority) => ({ authority, keyId: `${authority.toLowerCase()}-key`, publicKeyPem: authorityKeys.publicKey.export({ type: "spki", format: "pem" }) })));
 const trustRegistry = new EnvelopeSchemaRegistry();
-for (const type of [...events, "AuthorizationRevoked"]) trustRegistry.register(type, 1, { allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId", "repositoryId"] });
+for (const type of [...events, "AuthorizationRevoked"]) trustRegistry.register(type, 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId", "repositoryId"] });
 const evidenceStore = new Map();
 const resolveEvidence = (reference) => evidenceStore.get(reference.uri) ?? new Uint8Array();
 function envelope(type, index, overrides = {}) {
@@ -27,7 +27,10 @@ function envelope(type, index, overrides = {}) {
     payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId, step: index }, ...overrides };
   const eventBinding = transitionEventBinding(base);
   const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-key`, authority, eventBinding,
-    verdict: authority === "Dream" ? "VALIDATED" : authority === "Darwin" ? "ADMITTED" : authority === "Flywheel" ? "PROVED" : "AUTHORIZED" };
+    verdict: authority === "Dream" ? "VALIDATED" : authority === "Darwin" ? "ADMITTED" : authority === "Flywheel" ? "PROVED" : "AUTHORIZED",
+    proof: authority === "Dream" ? { sourceValidated: true } : authority === "Darwin" ? { mutationAdmitted: true }
+      : authority === "Flywheel" ? { gateReceipt: "cas://receipt", replayVerdict: "PASS", sequentialEvidence: "cas://alpha" }
+      : { approvalId: "approval-a", capability: "PROMOTE", constraints: { environment: "production" } } };
   const signature = sign(null, Buffer.from(canonicalJson(statement)), authorityKeys.privateKey).toString("base64");
   const evidenceBytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature }));
   const evidenceSha = digestBytes(evidenceBytes);
@@ -88,8 +91,8 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
   assert.deepEqual(encodeEnvelope(value), encodeEnvelope(structuredClone(value)));
   assert.throws(() => createEnvelope({ ...value, surprise: true }), /unknown critical/);
   const registry = new EnvelopeSchemaRegistry();
-  registry.register("HypothesisProposed", 1, { allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId"], validate: (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); } });
-  registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, { allowedFields: [] }), /already/);
+  registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId"], validate: (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); } });
+  registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: [] }), /already/);
   assert.deepEqual(decodeEnvelope(encodeEnvelope(value), registry), value);
   assert.throws(() => decodeEnvelope(new TextEncoder().encode("not json"), registry), /INVALID_ENVELOPE_JSON/);
   assert.throws(() => registry.validate(envelope("CandidateGenerated", 1)), /UNKNOWN_SCHEMA_VERSION/);

@@ -23,6 +23,7 @@ export type ArtifactReference = DigestReference;
 export interface PortResponse<T> {
   readonly data: T;
   readonly upstream: UpstreamEvidence;
+  readonly validated: true;
 }
 
 export type PortFailureCode = "CANCELLED" | "TIMEOUT" | "INCOMPATIBLE" | "UNAVAILABLE" | "FAILED";
@@ -66,7 +67,7 @@ export function validateUpstreamEvidence(evidence: UpstreamEvidence, expected: E
 
 export function validatedPortResponse<T>(data: T, upstream: UpstreamEvidence, expected: ExpectedUpstreamEvidence): Readonly<PortResponse<T>> {
   validateUpstreamEvidence(upstream, expected);
-  return Object.freeze({ data, upstream: Object.freeze({ ...upstream }) });
+  return Object.freeze({ data, upstream: Object.freeze({ ...upstream }), validated: true as const });
 }
 
 export function observeUnknown<T>(rawValue: string, known: Readonly<Record<string, T>>): ReadValue<T> {

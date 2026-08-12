@@ -11,6 +11,7 @@ export interface AuthorityEvidenceStatement {
   readonly authority: TransitionAuthority;
   readonly eventBinding: string;
   readonly verdict: "VALIDATED" | "ADMITTED" | "PROVED" | "AUTHORIZED";
+  readonly proof: Readonly<Record<string, unknown>>;
   readonly signature: string;
 }
 export interface AuthorityTrustRoot { readonly authority: TransitionAuthority; readonly keyId: string; readonly publicKeyPem: string; }
@@ -27,7 +28,9 @@ export function transitionEventBinding(event: EvolutionEnvelope): string {
 export class Ed25519AuthorityEvidenceVerifier {
   readonly #keys: ReadonlyMap<string, { authority: TransitionAuthority; key: KeyObject }>;
   constructor(roots: readonly AuthorityTrustRoot[]) {
-    if (roots.length === 0) throw new TypeError("at least one authority trust root is required");
+    const authorities = new Set(roots.map(({ authority }) => authority));
+    for (const required of ["Dream", "Darwin", "Flywheel", "Governance"]) if (!authorities.has(required as TransitionAuthority))
+      throw new TypeError(`missing ${required} authority trust root`);
     this.#keys = new Map(roots.map((root) => {
       if (!/^[a-z0-9][a-z0-9._-]{2,127}$/.test(root.keyId)) throw new TypeError("invalid authority key ID");
       return [root.keyId, { authority: root.authority, key: createPublicKey(root.publicKeyPem) }];
@@ -35,14 +38,21 @@ export class Ed25519AuthorityEvidenceVerifier {
     if (this.#keys.size !== roots.length) throw new TypeError("duplicate authority key ID");
   }
   verify({ authority, event, bytes }: { authority: TransitionAuthority; event: EvolutionEnvelope; reference: DigestReference; bytes: Uint8Array }): boolean {
+    if (bytes.byteLength > 65_536) return false;
     let statement: AuthorityEvidenceStatement;
     try { statement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { return false; }
+    if (!statement || typeof statement !== "object" || Array.isArray(statement) ||
+      Object.keys(statement).sort().join(",") !== ["authority", "eventBinding", "keyId", "proof", "schema", "signature", "verdict"].sort().join(",") ||
+      !statement.proof || typeof statement.proof !== "object" || Array.isArray(statement.proof)) return false;
     const root = this.#keys.get(statement.keyId);
     const verdict = authority === "Dream" ? "VALIDATED" : authority === "Darwin" ? "ADMITTED" : authority === "Flywheel" ? "PROVED" : "AUTHORIZED";
     if (statement.schema !== "agentics.authority-evidence/v1" || !root || root.authority !== authority || statement.authority !== authority ||
       statement.verdict !== verdict || statement.eventBinding !== transitionEventBinding(event) || !/^[A-Za-z0-9+/]+={0,2}$/.test(statement.signature)) return false;
+    const proofKeys = authority === "Dream" ? ["sourceValidated"] : authority === "Darwin" ? ["mutationAdmitted"]
+      : authority === "Flywheel" ? ["gateReceipt", "replayVerdict", "sequentialEvidence"] : ["approvalId", "capability", "constraints"];
+    if (proofKeys.some((key) => !Object.hasOwn(statement.proof, key))) return false;
     const unsigned = canonicalJson({ schema: statement.schema, keyId: statement.keyId, authority: statement.authority,
-      eventBinding: sha256Digest(statement.eventBinding), verdict: statement.verdict });
+      eventBinding: sha256Digest(statement.eventBinding), verdict: statement.verdict, proof: statement.proof });
     return verify(null, Buffer.from(unsigned), root.key, Buffer.from(statement.signature, "base64"));
   }
 }

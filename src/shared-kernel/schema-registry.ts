@@ -3,6 +3,7 @@ import { ENVELOPE_SCHEMA } from "./evolution-envelope.js";
 import { canonicalJson } from "./immutable.js";
 import { digestBytes } from "./digest.js";
 export interface PayloadSchema {
+  readonly schemaId: string;
   readonly allowedFields: readonly string[];
   readonly requiredFields?: readonly string[];
   readonly validate?: (payload: Readonly<Record<string, unknown>>) => void;
@@ -10,6 +11,7 @@ export interface PayloadSchema {
 export class EnvelopeSchemaRegistry {
   readonly #schemas = new Map<string, PayloadSchema>();
   register(eventType: string, schemaVersion: number, schema: PayloadSchema): void {
+    if (!/^agentics\.[a-z0-9.-]+\/v\d+$/.test(schema.schemaId)) throw new TypeError("payload schema requires versioned schemaId");
     const key = `${ENVELOPE_SCHEMA}:${eventType}@${schemaVersion}`;
     if (this.#schemas.has(key)) throw new TypeError(`schema already registered: ${key}`);
     this.#schemas.set(key, Object.freeze({ ...schema, allowedFields: Object.freeze([...schema.allowedFields]), requiredFields: Object.freeze([...(schema.requiredFields ?? [])]) }));
@@ -23,5 +25,5 @@ export class EnvelopeSchemaRegistry {
     for (const field of schema.requiredFields ?? []) if (!Object.hasOwn(envelope.payload, field)) throw new TypeError(`missing required payload field: ${field}`);
     schema.validate?.(envelope.payload);
   }
-  digest(): string { return digestBytes(new TextEncoder().encode(canonicalJson([...this.#schemas].map(([key, schema]) => ({ key, allowedFields: schema.allowedFields, requiredFields: schema.requiredFields ?? [] })).sort((a, b) => a.key.localeCompare(b.key))))); }
+  digest(): string { return digestBytes(new TextEncoder().encode(canonicalJson([...this.#schemas].map(([key, schema]) => ({ key, schemaId: schema.schemaId, allowedFields: schema.allowedFields, requiredFields: schema.requiredFields ?? [] })).sort((a, b) => a.key.localeCompare(b.key))))); }
 }

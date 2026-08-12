@@ -32,9 +32,9 @@ const envelope = createEnvelope({ envelopeSchema: "agentics.evolution-envelope/v
   ...identity, cycleId: cycleId("benchmark-cycle"), actorId: actorId("benchmark-actor"), occurredAt: utcInstant("2026-08-12T00:00:00.000Z"),
   causationId: newCausationId(), correlationId: newCorrelationId(), idempotencyKey: newIdempotencyKey(), policyEpoch: 1,
   sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }), evidence: [reference], payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId } });
-const registry = new EnvelopeSchemaRegistry(); registry.register("HypothesisProposed", 1, { allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
+const registry = new EnvelopeSchemaRegistry(); registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
 for (const type of ["CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"])
-  registry.register(type, 1, { allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
+  registry.register(type, 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
 const keys = generateKeyPairSync("ed25519");
 const authorityNames = ["Dream", "Darwin", "Flywheel", "Governance"];
 const verifier = new Ed25519AuthorityEvidenceVerifier(authorityNames.map((authority) => ({ authority, keyId: `${authority.toLowerCase()}-benchmark`, publicKeyPem: keys.publicKey.export({ type: "spki", format: "pem" }) })));
@@ -44,7 +44,10 @@ const histories = Array.from({ length: 2_500 }, (_, historyIndex) => {
   const history = ["HypothesisProposed", "CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"].map((type, step) => {
     const base = createEnvelope({ ...envelope, ...scoped, id: newEventId(), type, evidence: [], idempotencyKey: newIdempotencyKey(), occurredAt: utcInstant(`2026-08-12T00:00:0${step}.000Z`) });
     const authority = authorityNames[step]; const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-benchmark`, authority,
-      eventBinding: transitionEventBinding(base), verdict: ["VALIDATED", "ADMITTED", "PROVED", "AUTHORIZED"][step] };
+      eventBinding: transitionEventBinding(base), verdict: ["VALIDATED", "ADMITTED", "PROVED", "AUTHORIZED"][step],
+      proof: step === 0 ? { sourceValidated: true } : step === 1 ? { mutationAdmitted: true }
+        : step === 2 ? { gateReceipt: "cas://receipt", replayVerdict: "PASS", sequentialEvidence: "cas://alpha" }
+        : { approvalId: "benchmark-approval", capability: "PROMOTE", constraints: {} } };
     const bytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature: sign(null, Buffer.from(canonicalJson(statement)), keys.privateKey).toString("base64") }));
     const digest = digestBytes(bytes); const signedReference = digestReference({ uri: `cas://sha256/${digest}`, sha256: digest }); evidenceStore.set(signedReference.uri, bytes);
     return createEnvelope({ ...base, evidence: [signedReference] });
