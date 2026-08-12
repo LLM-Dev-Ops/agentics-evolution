@@ -27,6 +27,7 @@
     "install:platform-artifacts": "node scripts/install-platform-artifacts.mjs",
     "evidence:supply-chain": "node scripts/supply-chain.mjs",
     "build:brain-local": "node scripts/build-brain-local.mjs",
+    "build:governance-authorities": "node scripts/build-governance-authorities.mjs",
     "verify:brain-local": "node scripts/verify-brain-local.mjs",
     "evidence:sbom": "node scripts/generate-sbom.mjs",
     "evidence:provenance": "node scripts/provenance.mjs",
