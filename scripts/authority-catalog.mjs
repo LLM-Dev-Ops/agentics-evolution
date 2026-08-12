@@ -54,16 +54,33 @@ export async function loadAuthorityCatalog(path = "config/upstream-authorities.y
   if (catalog?.policy?.deviationsRequireExpiry !== true) failures.push("policy.deviationsRequireExpiry: must be true");
   if (!Array.isArray(catalog?.authorities) || catalog.authorities.length === 0) failures.push("authorities: required");
   if (!Array.isArray(catalog?.hosts) || catalog.hosts.length === 0) failures.push("hosts: required");
+  if (!Array.isArray(catalog?.sourceAuthorities) || catalog.sourceAuthorities.length === 0) failures.push("sourceAuthorities: required");
   for (const [index, authority] of (catalog?.authorities ?? []).entries())
     failures.push(...validatePackage(authority, `authorities[${index}]`, { authority: true }));
   for (const [index, host] of (catalog?.hosts ?? []).entries())
     failures.push(...validatePackage(host, `hosts[${index}]`));
+  for (const [index, source] of (catalog?.sourceAuthorities ?? []).entries()) {
+    const path = `sourceAuthorities[${index}]`;
+    if (!source?.name || !NAME.test(source.name)) failures.push(`${path}.name: invalid`);
+    if (!/^https:\/\/github\.com\/ruvnet\/[A-Za-z0-9._-]+\.git$/.test(source?.repository ?? "")) failures.push(`${path}.repository: unapproved source`);
+    if (!/^[a-f0-9]{40}$/.test(source?.commit ?? "")) failures.push(`${path}.commit: expected full commit SHA`);
+    if (!/^[a-f0-9]{40}$/.test(source?.sourceTree ?? "")) failures.push(`${path}.sourceTree: expected git tree SHA`);
+    if (typeof source?.path !== "string" || source.path.includes("..")) failures.push(`${path}.path: invalid`);
+    if (typeof source?.build !== "string" || !source.build.includes("--locked")) failures.push(`${path}.build: must be locked`);
+    if (typeof source?.binary !== "string" || source.binary.startsWith("/")) failures.push(`${path}.binary: invalid`);
+    nonEmptyStrings(source?.requiredCapabilities, `${path}.requiredCapabilities`, failures);
+    nonEmptyStrings(source?.contractTests, `${path}.contractTests`, failures);
+    if (!Array.isArray(source?.deviations)) failures.push(`${path}.deviations: expected an array`);
+  }
   const entries = [...(catalog?.authorities ?? []), ...(catalog?.hosts ?? [])];
   for (const key of ["name", "package"])
     if (new Set(entries.map((entry) => entry[key])).size !== entries.length) failures.push(`${key}: duplicate catalog entry`);
   for (const entry of entries)
     for (const testPath of entry.contractTests ?? [])
       try { await access(testPath); } catch { failures.push(`${entry.name}: contract test missing: ${testPath}`); }
+  for (const source of catalog?.sourceAuthorities ?? [])
+    for (const testPath of source.contractTests ?? [])
+      try { await access(testPath); } catch { failures.push(`${source.name}: contract test missing: ${testPath}`); }
   return { catalog, text, failures };
 }
 

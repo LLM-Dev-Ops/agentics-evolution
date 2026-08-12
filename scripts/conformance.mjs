@@ -35,6 +35,9 @@ const report = {
   })),
   hosts: catalog.hosts.map(({ name, package: packageName, version, integrity, requiredExports, owner }) => ({
     name, package: packageName, version, integrity, requiredExports, owner
+  })),
+  sourceAuthorities: catalog.sourceAuthorities.map(({ name, repository, commit, sourceTree, path, build, requiredCapabilities, owner }) => ({
+    name, repository, commit, sourceTree, path, build, requiredCapabilities, owner
   }))
 };
 await writeFile("reports/conformance.json", `${JSON.stringify(report, null, 2)}\n`);

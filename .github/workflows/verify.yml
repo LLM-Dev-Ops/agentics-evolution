@@ -25,3 +25,22 @@ jobs:
           path: reports/
           if-no-files-found: error
           retention-days: 30
+  brain-local-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20.19.5, cache: npm }
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { shared-key: ruvector-brain-local-9e12078a }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --ignore-scripts
+      - run: npm run verify:brain-local
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: brain-local-evidence-${{ github.sha }}
+          path: reports/brain-local-build.json
+          if-no-files-found: error
+          retention-days: 30

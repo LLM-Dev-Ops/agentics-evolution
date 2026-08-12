@@ -21,6 +21,8 @@
     "conformance": "node scripts/conformance.mjs",
     "probe:upstreams": "node scripts/probe-upstreams.mjs",
     "evidence:supply-chain": "node scripts/supply-chain.mjs",
+    "build:brain-local": "node scripts/build-brain-local.mjs",
+    "verify:brain-local": "node scripts/verify-brain-local.mjs",
     "evidence:sbom": "cyclonedx-npm --output-file reports/sbom.cdx.json --output-format JSON --spec-version 1.6",
     "evidence:provenance": "AGENTICS_EVIDENCE_MODE=test node scripts/provenance.mjs",
     "verify:sbom": "node scripts/validate-sbom.mjs",

@@ -10,6 +10,9 @@ test("authority catalog is complete and lock-bound", async () => {
   const { catalog, failures } = await loadAuthorityCatalog();
   assert.deepEqual(failures, []);
   assert.equal(catalog.authorities.length, 9);
+  assert.equal(catalog.sourceAuthorities.length, 1);
+  assert.match(catalog.sourceAuthorities[0].commit, /^[a-f0-9]{40}$/);
+  assert.match(catalog.sourceAuthorities[0].sourceTree, /^[a-f0-9]{40}$/);
   assert.deepEqual(catalog.hosts.map((host) => host.name).sort(), ["claude-code", "codex"]);
   for (const authority of catalog.authorities) {
     assert.ok(authority.requiredCapabilities.length > 0);

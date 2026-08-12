@@ -113,6 +113,18 @@ authorities:
     upstreamAdrs: [ADR-381]
     contractTests: [test/upstream-contracts.test.mjs]
     deviations: []
+sourceAuthorities:
+  - name: ruvector-brain-local
+    repository: https://github.com/ruvnet/RuVector.git
+    commit: 9e12078ae2af74d0613ae604266cf22fb1113b10
+    sourceTree: 65e7e033bf16fa37d387cfc5db2941b544838b4b
+    path: crates/mcp-brain-server
+    build: cargo build --locked --release -p mcp-brain-server --features local --bin mcp-brain-server-local
+    binary: target/release/mcp-brain-server-local
+    owner: platform-brain
+    requiredCapabilities: [health, status, share, search]
+    contractTests: [test/brain-local-contract.test.mjs]
+    deviations: []
 hosts:
   - name: claude-code
     package: "@metaharness/host-claude-code"
