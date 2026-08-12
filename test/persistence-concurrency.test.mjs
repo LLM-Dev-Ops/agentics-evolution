@@ -5,7 +5,7 @@ import { PubSub } from "@google-cloud/pubsub";
 import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
-  withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer
+  withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -64,6 +64,19 @@ test("serializable retry is bounded, jittered and never retries permanent errors
   assert.equal(attempts, 1);
 });
 
+test("transport enforces exact 256 KiB UTF-8 boundary and trace binding", () => {
+  const envelope = messageEnvelope(35); const attributes = { correlationId: envelope.correlationId, causationId: envelope.causationId,
+    traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01" };
+  const baseMessage = { envelope: { ...envelope, payload: { data: "" } }, orderingKey: "tenant-a/repo-a/transport-a", attributes };
+  const baseBytes = validateTransportMessage(baseMessage).byteLength;
+  const exact = { ...baseMessage, envelope: { ...baseMessage.envelope, payload: { data: "x".repeat(MAX_ENVELOPE_BYTES - baseBytes) } } };
+  assert.equal(validateTransportMessage(exact).byteLength, MAX_ENVELOPE_BYTES);
+  const oversized = { ...exact, envelope: { ...exact.envelope, payload: { data: `${exact.envelope.payload.data}x` } } };
+  assert.throws(() => validateTransportMessage(oversized), /PAYLOAD_TOO_LARGE/);
+  assert.throws(() => validateTransportMessage({ ...baseMessage, attributes: { ...attributes, traceparent: "attacker" } }), /INVALID_TRACEPARENT/);
+  assert.throws(() => validateTransportMessage({ ...baseMessage, orderingKey: "tenant-a/repo-b/transport-a" }), /INVALID_ORDERING_KEY/);
+});
+
 test("authorization consumption and champion CAS have one winner", { skip: !url }, async () => {
   const admin = new Client({ connectionString: url }); await admin.connect(); await admin.query("DELETE FROM critical_resources WHERE tenant_id='tenant-a' AND resource_id IN ('auth-c','champ-c')"); await admin.end();
   const database = new PostgresPersistence(configuration); const store = new CriticalResourceStore(database);
@@ -94,17 +107,38 @@ test("durable local transport supports at-least-once nack/redelivery and fenced 
 
 test("Pub/Sub emulator uses the same validated message contract and redelivers nack", { skip: !process.env.PUBSUB_EMULATOR_HOST }, async () => {
   const projectId = "agentics-test"; const client = new PubSub({ projectId });
-  const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const subscriptionName = `agentics-events-${suffix}`;
-  const [topic] = await client.createTopic(topicName); await topic.createSubscription(subscriptionName, { ackDeadlineSeconds: 10 });
+  const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const deadLetterTopicName = "evolution.deadletter.v1";
+  const subscriptionName = `agentics-events-${suffix}`; const poisonSubscription = `agentics-poison-${suffix}`; const deadLetterSubscription = `agentics-dead-${suffix}`;
+  const [topic] = await client.createTopic(topicName); const [deadLetterTopic] = await client.createTopic(deadLetterTopicName);
+  await topic.createSubscription(subscriptionName, { ackDeadlineSeconds: 10 }); await deadLetterTopic.createSubscription(deadLetterSubscription, { ackDeadlineSeconds: 10 });
   const envelope = messageEnvelope(41); const message = { envelope, orderingKey: "tenant-a/repo-a/transport-a",
     attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } };
   const publisher = new GooglePubSubTransport(client);
   const consumer = new GooglePubSubConsumer(client, (bytes, attributes, orderingKey) => ({
     envelope: JSON.parse(new TextDecoder().decode(bytes)), orderingKey, attributes
-  }));
+  }), new GooglePubSubPoisonSink(client));
   try {
     const receipt = await publisher.publish(topicName, message); assert.ok(receipt.messageId);
     const first = await consumer.receiveOne(subscriptionName); assert.equal(first.message.envelope.id, envelope.id); assert.equal(first.message.orderingKey, message.orderingKey); first.nack();
-    const second = await consumer.receiveOne(subscriptionName); assert.equal(second.messageId, first.messageId); second.ack();
-  } finally { await client.subscription(subscriptionName).delete().catch(() => undefined); await topic.delete().catch(() => undefined); await client.close(); }
+    const second = await consumer.receiveOne(subscriptionName); assert.equal(second.messageId, first.messageId); await second.ack();
+    await topic.createSubscription(poisonSubscription, { ackDeadlineSeconds: 10 });
+    await topic.publishMessage({ data: Buffer.from("{malformed"), orderingKey: message.orderingKey,
+      attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId, traceparent: "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01", secret: "must-not-propagate" } });
+    let poisonRejected = false;
+    for (let attempt = 0; attempt < 4 && !poisonRejected; attempt++) {
+      try { await (await consumer.receiveOne(poisonSubscription)).ack(); }
+      catch (error) { assert.match(String(error), /PUBSUB_POISON_DEAD_LETTERED/); poisonRejected = true; }
+    }
+    assert.equal(poisonRejected, true);
+    const poison = await new Promise((resolve, reject) => {
+      const subscription = client.subscription(deadLetterSubscription); const timer = setTimeout(() => reject(new Error("dead-letter timeout")), 5_000);
+      subscription.once("message", (raw) => { clearTimeout(timer); raw.ack(); resolve(JSON.parse(raw.data.toString("utf8"))); }); subscription.once("error", reject);
+    });
+    assert.equal(poison.reason, "MALFORMED_ENVELOPE"); assert.equal(poison.attributes.correlationId, envelope.correlationId);
+    assert.equal(poison.attributes.traceparent, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"); assert.equal("secret" in poison.attributes, false);
+  } finally {
+    await client.subscription(subscriptionName).delete().catch(() => undefined); await client.subscription(poisonSubscription).delete().catch(() => undefined);
+    await client.subscription(deadLetterSubscription).delete().catch(() => undefined);
+    await topic.delete().catch(() => undefined); await deadLetterTopic.delete().catch(() => undefined); await client.close();
+  }
 });

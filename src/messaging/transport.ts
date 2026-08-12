@@ -13,5 +13,6 @@ export function validateTransportMessage(message: TransportMessage): Uint8Array 
   if (message.orderingKey !== expected) throw new TypeError("INVALID_ORDERING_KEY");
   if (message.attributes.correlationId !== message.envelope.correlationId || message.attributes.causationId !== message.envelope.causationId)
     throw new TypeError("INVALID_TRACE_BINDING");
+  if (message.attributes.traceparent && !/^00-[a-f0-9]{32}-[a-f0-9]{16}-0[01]$/.test(message.attributes.traceparent)) throw new TypeError("INVALID_TRACEPARENT");
   return bytes;
 }
