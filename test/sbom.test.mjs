@@ -18,3 +18,9 @@ test("missing selected platform dependency edges are rejected", () => {
   merged.dependencies = merged.dependencies.filter(({ ref }) => ref !== "platform@0|native@1");
   assert.match(platformGraphFailures(merged).join("\n"), /dependency edge is missing/);
 });
+
+test("dangling selected platform root is rejected", () => {
+  const merged = mergeSboms(base, platform);
+  merged.components = merged.components.filter(({ "bom-ref": ref }) => ref !== "platform@0");
+  assert.match(platformGraphFailures(merged).join("\n"), /platform root entity is missing/);
+});
