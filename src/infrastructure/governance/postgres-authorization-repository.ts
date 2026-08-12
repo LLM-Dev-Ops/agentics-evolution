@@ -1,0 +1,33 @@
+import { randomUUID } from "node:crypto";
+import { withSerializableRetry, type PostgresPersistence } from "../../persistence/postgres.js";
+import { canonicalJson } from "../../shared-kernel/immutable.js";
+import { digestBytes } from "../../shared-kernel/digest.js";
+import type { AuthorizationRequest, PromotionAuthorization } from "../../contexts/governance/domain/authorization.js";
+import { approveAuthorization, requestAuthorization } from "../../contexts/governance/domain/authorization.js";
+import type { CapabilityEnvelope } from "../../contexts/governance/domain/capability.js";
+import { moneyFromWire } from "../../shared-kernel/money.js";
+
+export class PostgresAuthorizationRepository {
+ constructor(readonly database: PostgresPersistence) {}
+ async request(tenantId:string,repositoryId:string,input:AuthorizationRequest,idempotencyKey:string):Promise<PromotionAuthorization>{
+  const state=requestAuthorization(input); const wireInput=wire(input); const wireState=wire(state); return this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{
+   const prior=await client.query("SELECT request_digest,response FROM governance_idempotency WHERE tenant_id=$1 AND idempotency_key=$2",[tenantId,idempotencyKey]); const requestDigest=digestBytes(new TextEncoder().encode(canonicalJson(wireInput)));
+   if(prior.rowCount){if(prior.rows[0].request_digest!==requestDigest)throw new TypeError("IDEMPOTENCY_CONFLICT");return this.hydrateWire(prior.rows[0].response);}
+   await client.query(`INSERT INTO governance_authorizations(tenant_id,repository_id,authorization_id,requester,candidate_digest,evidence_digest,environment,expected_champion_version,policy_epoch,requested_envelope,state,expires_at,max_uses)
+    VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'REQUESTED',$11,$12)`,[tenantId,repositoryId,input.id,input.requester,input.candidateDigest,input.evidenceDigest,input.environment,input.expectedChampionVersion,input.policyEpoch,wire(input.envelope),input.expiresAt,input.maxUses]);
+   await this.event(client,tenantId,input.id,0,"PromotionAuthorizationRequested",input.requester,{repositoryId}); await client.query("INSERT INTO governance_idempotency VALUES($1,$2,$3,$4)",[tenantId,idempotencyKey,requestDigest,wireState]);return state;});
+ }
+ async approve(tenantId:string,id:string,approver:string,envelope:CapabilityEnvelope):Promise<void>{await this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{
+  const row=await this.lock(client,tenantId,id); const domain=this.hydrate(row); const next=approveAuthorization(domain,approver,envelope);
+  const updated=await client.query("UPDATE governance_authorizations SET state='APPROVED',approver=$3,approved_envelope=$4,version=version+1,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND authorization_id=$2 AND state='REQUESTED' AND transaction_timestamp()<expires_at RETURNING version",[tenantId,id,approver,wire(next.approvedEnvelope)]);
+  if(!updated.rowCount)throw new TypeError("AUTHORIZATION_APPROVAL_CONFLICT");await this.event(client,tenantId,id,Number(updated.rows[0].version),"PromotionApproved",approver,{});});}
+ async terminate(tenantId:string,id:string,actor:string,state:"DENIED"|"REVOKED"):Promise<void>{await this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{const updated=await client.query("UPDATE governance_authorizations SET state=$3,version=version+1,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND authorization_id=$2 AND state IN('REQUESTED','APPROVED') RETURNING version",[tenantId,id,state]);if(!updated.rowCount)throw new TypeError("AUTHORIZATION_TERMINAL_CONFLICT");await this.event(client,tenantId,id,Number(updated.rows[0].version),state==="DENIED"?"PromotionDenied":"AuthorizationRevoked",actor,{});});}
+ async consume(tenantId:string,id:string,actor:string):Promise<boolean>{return withSerializableRetry(()=>this.database.tenantTransaction(tenantId,"SERIALIZABLE",async client=>{const updated=await client.query(`UPDATE governance_authorizations SET uses=uses+1,state=CASE WHEN uses+1=max_uses THEN 'CONSUMED' ELSE 'APPROVED' END,version=version+1,updated_at=transaction_timestamp()
+   WHERE tenant_id=$1 AND authorization_id=$2 AND state='APPROVED' AND uses<max_uses AND transaction_timestamp()<expires_at RETURNING version`,[tenantId,id]);if(!updated.rowCount)return false;await this.event(client,tenantId,id,Number(updated.rows[0].version),"AuthorizationConsumed",actor,{});return true;}),{maxAttempts:20,baseDelayMs:2,deadlineMs:Date.now()+20_000});}
+ private async lock(client:any,tenant:string,id:string){const result=await client.query("SELECT * FROM governance_authorizations WHERE tenant_id=$1 AND authorization_id=$2 FOR UPDATE",[tenant,id]);if(!result.rows[0])throw new TypeError("AUTHORIZATION_NOT_FOUND");return result.rows[0];}
+ private hydrate(row:any):PromotionAuthorization{return {request:{id:row.authorization_id,requester:row.requester,candidateDigest:row.candidate_digest,evidenceDigest:row.evidence_digest,environment:row.environment,expectedChampionVersion:Number(row.expected_champion_version),policyEpoch:row.policy_epoch,envelope:envelopeFromWire(row.requested_envelope),expiresAt:new Date(row.expires_at).toISOString(),maxUses:row.max_uses},state:row.state,approvedEnvelope:row.approved_envelope?envelopeFromWire(row.approved_envelope):null,approver:row.approver,uses:row.uses,version:Number(row.version)};}
+ private hydrateWire(value:any):PromotionAuthorization{return {...value,request:{...value.request,envelope:envelopeFromWire(value.request.envelope)},approvedEnvelope:value.approvedEnvelope?envelopeFromWire(value.approvedEnvelope):null};}
+ private async event(client:any,tenant:string,id:string,version:number,type:string,actor:string,payload:object){const eventId=randomUUID();await client.query("INSERT INTO governance_authorization_events VALUES($1,$2,$3,$4,$5,$6,$7,transaction_timestamp())",[tenant,id,version,type,actor,eventId,payload]);const repository=(await client.query("SELECT repository_id FROM governance_authorizations WHERE tenant_id=$1 AND authorization_id=$2",[tenant,id])).rows[0].repository_id;await client.query("INSERT INTO outbox(tenant_id,event_id,repository_id,aggregate_id,topic,ordering_key,envelope) VALUES($1,$2,$3,$4,'evolution.events.v1',$5,$6)",[tenant,eventId,repository,id,`${tenant}/${repository}/${id}`,{type,authorizationId:id,payload}]);}
+}
+function wire<T>(value:T):any{return JSON.parse(JSON.stringify(value,(_key,item)=>typeof item==="bigint"?item.toString():item));}
+function envelopeFromWire(value:any):CapabilityEnvelope{return {...value,spend:moneyFromWire(value.spend)};}
