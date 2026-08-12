@@ -20,9 +20,8 @@ test("authority catalog is complete and lock-bound", async () => {
   const { catalog, failures } = await loadAuthorityCatalog();
   assert.deepEqual(failures, []);
   assert.equal(catalog.authorities.length, 9);
-  assert.equal(catalog.sourceAuthorities.length, 1);
-  assert.match(catalog.sourceAuthorities[0].commit, /^[a-f0-9]{40}$/);
-  assert.match(catalog.sourceAuthorities[0].sourceTree, /^[a-f0-9]{40}$/);
+  assert.deepEqual(catalog.sourceAuthorities.map(({name})=>name).sort(),["agentics-contracts","agentics-enforcement","agentics-policy-engine","agentics-usage-ledger","ruvector-brain-local"]);
+  for(const source of catalog.sourceAuthorities){assert.match(source.commit,/^[a-f0-9]{40}$/);assert.match(source.sourceTree,/^[a-f0-9]{40}$/);assert.match(source.build,/^(?:npm ci|cargo build --locked)/);}
   assert.deepEqual(catalog.hosts.map((host) => host.name).sort(), ["claude-code", "codex"]);
   for (const authority of catalog.authorities) {
     assert.ok(authority.requiredCapabilities.length > 0);
