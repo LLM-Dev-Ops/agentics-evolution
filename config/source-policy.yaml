@@ -8,6 +8,9 @@ upstreamContractTests:
   - test/upstream-behavior.test.mjs
   - test/upstream-contracts.test.mjs
   - test/artifact-lineage.test.mjs
+  - test/offline-verifier.test.mjs
+additionalUpstreamAdapterRoots:
+  "@metaharness/flywheel": [packages/offline-verifier]
 layers:
   domain: src/domain
   application: src/application
