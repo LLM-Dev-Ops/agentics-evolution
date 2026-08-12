@@ -1,0 +1,1 @@
+export type SigningPurpose = "CYCLE_WITNESS" | "EVALUATION_RECEIPT" | "RELEASE_PROVENANCE";
