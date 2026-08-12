@@ -6,7 +6,7 @@ import { PostgresBudgetAuthority } from "../dist/infrastructure/governance/postg
 import { repositoryId, tenantId } from "../dist/index.js";
 
 test("budget saga concurrent reserve converges and consume is idempotent with one outbox transition", { skip: !process.env.TEST_DATABASE_URL }, async t => {
-  const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 20, statementTimeoutMs: 10_000, lockTimeoutMs: 5_000 }); t.after(() => database.close());
+  const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 20, statementTimeoutMs: 10_000, lockTimeoutMs: 5_000, enforceRuntimeRole: false }); t.after(() => database.close());
   const tenant = tenantId("tenant-a"), repository = repositoryId("repo-a"), key = randomUUID(), reservationId = `reservation-${key}`;
   const ledger = { reserve: async input => ({ reservationId, status: "active", amount: input.amount, expiresAt: new Date(Date.now()+60_000).toISOString() }),
     consume: async input => ({ entryId: `entry-${input.reservationId}`, amount: input.actualAmount }), cancel: async input => ({ reservationId: input.reservationId, status: "cancelled", amount: "10", expiresAt: new Date().toISOString() }) };
