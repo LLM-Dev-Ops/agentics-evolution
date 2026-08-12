@@ -19,6 +19,7 @@ for (const path of required) subjects.push({ path, sha256: sha256(await readFile
 const prompt02 = process.env.AGENTICS_BUILD_PROMPT === "02";
 const prompt03 = process.env.AGENTICS_BUILD_PROMPT === "03";
 const prompt04 = process.env.AGENTICS_BUILD_PROMPT === "04";
+const prompt05 = process.env.AGENTICS_BUILD_PROMPT === "05";
 for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-boundaries.json", "reports/prompt-02-properties.json"]) {
   const exists = await access(path).then(() => true, () => false);
   if (prompt02 && !exists) throw new Error(`Prompt 02 provenance requires ${path}`);
@@ -27,6 +28,8 @@ for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-b
 if (prompt03) for (const path of ["reports/prompt-03-postgres.json", "reports/prompt-03-benchmark.json"])
   subjects.push({ path, sha256: sha256(await readFile(path)) });
 if (prompt04) for (const path of ["reports/prompt-04-benchmark.json", "reports/prompt-04-conformance.json"])
+  subjects.push({ path, sha256: sha256(await readFile(path)) });
+if (prompt05) for (const path of ["reports/prompt-05-benchmark.json", "reports/prompt-05-conformance.json"])
   subjects.push({ path, sha256: sha256(await readFile(path)) });
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
@@ -38,9 +41,9 @@ const statement = {
   predicateType: "https://slsa.dev/provenance/v1",
   predicate: {
     buildDefinition: {
-      buildType: prompt04 ? "https://agentics.dev/build-types/prompt-04-evidence/v1" : prompt03 ? "https://agentics.dev/build-types/prompt-03-evidence/v1" : prompt02 ? "https://agentics.dev/build-types/prompt-02-evidence/v1" : "https://agentics.dev/build-types/prompt-01-evidence/v1",
+      buildType: prompt05 ? "https://agentics.dev/build-types/prompt-05-evidence/v1" : prompt04 ? "https://agentics.dev/build-types/prompt-04-evidence/v1" : prompt03 ? "https://agentics.dev/build-types/prompt-03-evidence/v1" : prompt02 ? "https://agentics.dev/build-types/prompt-02-evidence/v1" : "https://agentics.dev/build-types/prompt-01-evidence/v1",
       externalParameters: { source: { uri: "git+https://github.com/LLM-Dev-Ops/agentics-evolution", digest: { gitCommit: commit } } },
-      internalParameters: { command: prompt04 ? "npm run verify:prompt-04" : prompt03 ? "npm run verify:prompt-03" : prompt02 ? "npm run verify:prompt-02" : "npm run verify:prompt-01", evidenceMode: process.env.AGENTICS_EVIDENCE_MODE ?? "production" },
+      internalParameters: { command: prompt05 ? "npm run verify:prompt-05" : prompt04 ? "npm run verify:prompt-04" : prompt03 ? "npm run verify:prompt-03" : prompt02 ? "npm run verify:prompt-02" : "npm run verify:prompt-01", evidenceMode: process.env.AGENTICS_EVIDENCE_MODE ?? "production" },
       resolvedDependencies: [
         { uri: "pkg:generic/node", digest: { version: process.version } },
         { uri: "pkg:npm/npm", digest: { version: npmVersion } }
