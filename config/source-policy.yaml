@@ -7,6 +7,7 @@ upstreamContractTests:
   - test/brain-local-contract.test.mjs
   - test/upstream-behavior.test.mjs
   - test/upstream-contracts.test.mjs
+  - test/artifact-lineage.test.mjs
 layers:
   domain: src/domain
   application: src/application

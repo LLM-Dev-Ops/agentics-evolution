@@ -47,7 +47,9 @@
   },
   "dependencies": {
     "@claude-flow/cli": "3.38.0",
+    "@google-cloud/kms": "5.7.0",
     "@google-cloud/pubsub": "5.3.1",
+    "@google-cloud/storage": "7.22.0",
     "@metaharness/darwin": "0.9.1",
     "@metaharness/flywheel": "0.1.10",
     "@metaharness/harness": "0.2.0",
