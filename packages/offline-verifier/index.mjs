@@ -32,11 +32,14 @@ function exactKeys(value, keys, reason) {
 
 export async function verifyBundle(root, trustedCheckpoint, options = {}) {
   if (!/^[a-f0-9]{64}$/.test(trustedCheckpoint)) throw new Error("INVALID_TRUST_CHECKPOINT");
+  if (!/^sha256:[a-f0-9]{64}$/.test(options.expectedGateFingerprint ?? "")) throw new Error("EXPECTED_GATE_FINGERPRINT_REQUIRED");
+  if (typeof options.trustedKeyManifestSignerPem !== "string" || !options.trustedKeyManifestSignerPem.includes("PUBLIC KEY")) throw new Error("TRUSTED_KEY_MANIFEST_SIGNER_REQUIRED");
   const files = await safeFiles(root); const index = await json(root, "bundle.json");
   exactKeys(index, ["schema", "manifest", "objects", "receipt", "keyManifest", "rvf"], "INVALID_BUNDLE_INDEX");
   if (index.schema !== "agentics.offline-bundle/v1") throw new Error("UNKNOWN_BUNDLE_SCHEMA");
   const keyManifest = await json(root, index.keyManifest.path);
   if (sha256(Buffer.from(canon(keyManifest.payload))) !== trustedCheckpoint) throw new Error("UNTRUSTED_KEY_MANIFEST");
+  if (keyManifest.signerPublicKey !== options.trustedKeyManifestSignerPem) throw new Error("UNTRUSTED_KEY_MANIFEST_SIGNER");
   if (!verifySignature(null, Buffer.from(canon(keyManifest.payload)), createPublicKey(keyManifest.signerPublicKey), Buffer.from(keyManifest.signature, "base64"))) throw new Error("INVALID_KEY_MANIFEST_SIGNATURE");
   const manifest = await json(root, index.manifest.path); const manifestBytes = Buffer.from(canon(manifest.payload));
   exactKeys(manifest, ["payload", "keyId", "signature"], "INVALID_MANIFEST_ENVELOPE");
@@ -52,10 +55,13 @@ export async function verifyBundle(root, trustedCheckpoint, options = {}) {
     const bytes = await readFile(join(root, entry.path)); if (bytes.length !== entry.size || sha256(bytes) !== reference.sha256) throw new Error("OBJECT_INTEGRITY_FAILURE");
   }
   const receipt = await json(root, index.receipt.path); if (!verifyReceipt(receipt)) throw new Error("INVALID_FLYWHEEL_RECEIPT");
+  const trustedReceiptKey = keyManifest.payload.keys.find(entry => entry.status === "ACTIVE" &&
+    entry.purposes.includes("EVALUATION_RECEIPT") && entry.publicKey === receipt.publicKey);
+  if (!trustedReceiptKey) throw new Error("UNTRUSTED_RECEIPT_SIGNER");
   exactKeys(receipt.payload, ["manifestDigest", "artifactDigests", "gateFingerprint"], "INVALID_RECEIPT_BINDING");
   if (receipt.payload.manifestDigest !== index.manifest.sha256 || !Array.isArray(receipt.payload.artifactDigests) ||
       canon(receipt.payload.artifactDigests) !== canon(ordered.map(reference => reference.sha256)) ||
-      !/^sha256:[a-f0-9]{64}$/.test(receipt.payload.gateFingerprint)) throw new Error("INVALID_RECEIPT_BINDING");
+      receipt.payload.gateFingerprint !== options.expectedGateFingerprint) throw new Error("INVALID_RECEIPT_BINDING");
   const rvfFiles = [];
   if (manifest.payload.rvfWitness !== null && manifest.payload.rvfWitness !== undefined) {
     if (!index.rvf) throw new Error("MISSING_RVF_BUNDLE");

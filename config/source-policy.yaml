@@ -11,6 +11,7 @@ upstreamContractTests:
   - test/offline-verifier.test.mjs
 additionalUpstreamAdapterRoots:
   "@metaharness/flywheel": [packages/offline-verifier]
+  ruvector: [packages/offline-verifier]
 layers:
   domain: src/domain
   application: src/application
