@@ -30,6 +30,13 @@ allowedUpstreamAdapters:
   "@metaharness/host-claude-code": src/infrastructure/upstream-metaharness
   "@metaharness/host-codex": src/infrastructure/upstream-metaharness
   ruvector: src/infrastructure/upstream-ruvector
+  "@ruvector/rvf": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-node-linux-arm64-gnu": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-node-linux-x64-gnu": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-solver": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-wasm": src/infrastructure/upstream-ruvector
+  ruvector-core-linux-arm64-gnu: src/infrastructure/upstream-ruvector
+  ruvector-core-linux-x64-gnu: src/infrastructure/upstream-ruvector
 forbiddenAlgorithmSymbols: [evolve, inspectVariant, validateGeneratedCode, flywheelGate, reasoningBank, nightlyLearner, vectorSearch]
 algorithmFingerprints:
   # SHA-256 of identifier/literal-normalized TypeScript AST shapes. These are

@@ -64,10 +64,19 @@ export async function loadAuthorityCatalog(path = "config/upstream-authorities.y
   if (!Array.isArray(catalog?.authorities) || catalog.authorities.length === 0) failures.push("authorities: required");
   if (!Array.isArray(catalog?.hosts) || catalog.hosts.length === 0) failures.push("hosts: required");
   if (!Array.isArray(catalog?.sourceAuthorities) || catalog.sourceAuthorities.length === 0) failures.push("sourceAuthorities: required");
+  if (!Array.isArray(catalog?.platformArtifacts) || catalog.platformArtifacts.length === 0) failures.push("platformArtifacts: required");
   for (const [index, authority] of (catalog?.authorities ?? []).entries())
     failures.push(...validatePackage(authority, `authorities[${index}]`, { authority: true }));
   for (const [index, host] of (catalog?.hosts ?? []).entries())
     failures.push(...validatePackage(host, `hosts[${index}]`));
+  for (const [index, artifact] of (catalog?.platformArtifacts ?? []).entries()) {
+    const path = `platformArtifacts[${index}]`;
+    if (!artifact?.package) failures.push(`${path}.package: required`);
+    if (!EXACT_VERSION.test(artifact?.version ?? "")) failures.push(`${path}.version: must be exact`);
+    if (!INTEGRITY.test(artifact?.integrity ?? "")) failures.push(`${path}.integrity: invalid sha512`);
+    if (artifact?.adapter !== "infrastructure/upstream-ruvector") failures.push(`${path}.adapter: invalid`);
+    if (!/^(any|linux-(?:x64|arm64)-gnu)$/.test(artifact?.platform ?? "")) failures.push(`${path}.platform: invalid`);
+  }
   for (const [index, source] of (catalog?.sourceAuthorities ?? []).entries()) {
     const path = `sourceAuthorities[${index}]`;
     if (!source?.name || !NAME.test(source.name)) failures.push(`${path}.name: invalid`);

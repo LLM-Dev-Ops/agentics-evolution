@@ -106,6 +106,7 @@ for (const file of allFiles) {
 }
 const catalogPackages = new Set(catalog.authorities.map((entry) => entry.package));
 for (const item of catalog.hosts ?? []) catalogPackages.add(item.package);
+for (const item of catalog.platformArtifacts ?? []) catalogPackages.add(item.package);
 const implicitPackages = new Set(["claude-flow", "@claude-flow/cli", "@metaharness/kernel"]);
 for (const dependency of Object.keys(policy.allowedUpstreamAdapters)) {
   if (!catalogPackages.has(dependency) && !implicitPackages.has(dependency))
