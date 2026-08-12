@@ -1,0 +1,10 @@
+import { performance } from "node:perf_hooks";
+import { mkdir, writeFile } from "node:fs/promises";
+import { normalizeEnvelope, isEnvelopeSubset } from "../dist/contexts/governance/domain/capability.js";
+import { money } from "../dist/shared-kernel/money.js";
+const parent = normalizeEnvelope({ tenantId:"tenant-a",repositories:["repo-a","repo-b"],paths:["src","test"],tools:["read","write"],network:["api.example.com:443"],providers:["private"],models:["model-a"],regions:["us-central1"],classification:"RESTRICTED",spend:money(1000000n,"USD"),concurrency:32,expiresAt:"2099-01-01T00:00:00.000Z",depth:8,uses:100,action:"candidate.evaluate" });
+const child = normalizeEnvelope({ ...parent,repositories:["repo-a"],paths:["src"],tools:["read"],concurrency:4,spend:money(1000n,"USD"),depth:4,uses:10 });
+const samples=[]; const operations=100_000; for(let i=0;i<operations;i++){const start=performance.now();if(!isEnvelopeSubset(child,parent))throw new Error("SUBSET_REGRESSION");samples.push(performance.now()-start);} samples.sort((a,b)=>a-b);
+const p=x=>samples[Math.min(samples.length-1,Math.floor(samples.length*x))]; const elapsed=samples.reduce((a,b)=>a+b,0);
+const report={schema:"agentics.prompt-05-benchmark/v1",fixture:{operations},envelopeSubset:{p50Ms:p(.5),p95Ms:p(.95),p99Ms:p(.99),throughputPerSecond:operations/(elapsed/1000)},limits:{p99Ms:1,minimumThroughputPerSecond:10000},environment:{node:process.version,platform:process.platform,arch:process.arch,rssBytes:process.memoryUsage().rss}};
+if(report.envelopeSubset.p99Ms>report.limits.p99Ms||report.envelopeSubset.throughputPerSecond<report.limits.minimumThroughputPerSecond)throw new Error("PROMPT_05_BENCHMARK_REGRESSION");await mkdir("reports",{recursive:true});await writeFile("reports/prompt-05-benchmark.json",`${JSON.stringify(report,null,2)}\n`);console.log(JSON.stringify(report));
