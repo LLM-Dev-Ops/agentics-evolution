@@ -2,10 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import pg from "pg";
 import { PubSub } from "@google-cloud/pubsub";
+import { generateKeyPairSync, sign } from "node:crypto";
 import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
-  withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES
+  withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES,
+  ReplayCapabilityVerifier, replayEffectPolicy, canonicalJson
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -75,6 +77,23 @@ test("transport enforces exact 256 KiB UTF-8 boundary and trace binding", () => 
   assert.throws(() => validateTransportMessage(oversized), /PAYLOAD_TOO_LARGE/);
   assert.throws(() => validateTransportMessage({ ...baseMessage, attributes: { ...attributes, traceparent: "attacker" } }), /INVALID_TRACEPARENT/);
   assert.throws(() => validateTransportMessage({ ...baseMessage, orderingKey: "tenant-a/repo-b/transport-a" }), /INVALID_ORDERING_KEY/);
+});
+
+test("replay is dry-run by default and live effects require signed scoped capability", () => {
+  const envelope = messageEnvelope(36); const dryRun = replayEffectPolicy("DRY_RUN", envelope);
+  assert.equal(dryRun.allowExternalEffects, false); assert.equal(dryRun.allowNormalTopicPublish, false);
+  assert.throws(() => replayEffectPolicy("LIVE", envelope, { statement: {} }), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
+  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+  const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
+  const statement = { schema: "agentics.replay-capability/v1", replayId: "replay-1", issuer: "governance", tenantId: envelope.tenantId,
+    repositoryId: envelope.repositoryId, eventTypes: [envelope.type], expiresAt: "2026-08-13T00:00:00.000Z" };
+  const bytes = new TextEncoder().encode(canonicalJson(statement)); const capability = verifier.verify(bytes, sign(null, bytes, privateKey));
+  const live = replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-12T00:00:00.000Z"));
+  assert.equal(live.allowExternalEffects, true); assert.equal(live.allowNormalTopicPublish, false); assert.equal(live.replayId, "replay-1");
+  assert.throws(() => replayEffectPolicy("LIVE", { ...envelope, tenantId: "tenant-b" }, capability, Date.parse("2026-08-12T00:00:00.000Z")), /REPLAY_SCOPE_MISMATCH/);
+  assert.throws(() => replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-14T00:00:00.000Z")), /REPLAY_CAPABILITY_EXPIRED/);
+  const altered = new TextEncoder().encode(canonicalJson({ ...statement, tenantId: "tenant-b" }));
+  assert.throws(() => verifier.verify(altered, sign(null, bytes, privateKey)), /UNTRUSTED_REPLAY_CAPABILITY/);
 });
 
 test("authorization consumption and champion CAS have one winner", { skip: !url }, async () => {
