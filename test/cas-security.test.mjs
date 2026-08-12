@@ -42,7 +42,8 @@ test("delete requires a scoped live fenced intent token", async () => {
       intentId: "intent-1", expiresAt: new Date(Date.now() + 60_000).toISOString(), fencingToken: 1, ...overrides });
     await assert.rejects(cas.delete(ref, token({ digest: "00".repeat(32) })), /INVALID_DELETE_TOKEN/);
     await assert.rejects(cas.delete(ref, token({ expiresAt: "2020-01-01T00:00:00Z" })), /ACCESS_EXPIRED/);
-    const valid = token(); await assert.rejects(cas.delete(ref, { receipt: `${valid.receipt.slice(0, -1)}x` }), /ACCESS_SIGNATURE/);
+    const valid = token(); const [payload, signature] = valid.receipt.split(".");
+    await assert.rejects(cas.delete(ref, { receipt: `${payload}.${signature[0] === "A" ? "B" : "A"}${signature.slice(1)}` }), /ACCESS_SIGNATURE/);
     await assert.rejects(cas.delete(ref, token({ repositoryId: repositoryId("repo-b") })), /NOT_FOUND/);
     await cas.delete(ref, token()); assert.equal(await cas.exists(ref), false);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -57,5 +58,15 @@ test("identical bytes have independent tenant scopes and cannot be deleted by an
     assert.deepEqual([...await cas.read(ref, access.issueRead({ tenantId: tenantB, repositoryId: repoB, expiresAt: new Date(Date.now() + 60_000).toISOString() }))], [...bytes]);
     const wrong = access.issueDelete({ tenantId: tenantId("tenant-c"), repositoryId: repositoryId("repo-c"), digest: ref.sha256, intentId: "unscoped", expiresAt: new Date(Date.now() + 60_000).toISOString(), fencingToken: 1 });
     await assert.rejects(cas.delete(ref, wrong), /NOT_FOUND/); assert.equal(await cas.exists(ref), true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("concurrent tenant finalization preserves every scope without lost updates", async () => {
+  const root = await mkdtemp(join(tmpdir(), "cas-concurrent-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode("concurrent-shared"); const ref = reference(bytes);
+  const scopes = Array.from({ length: 12 }, (_, index) => ({ ...metadata, tenantId: tenantId(`tenant-${index}`), repositoryId: repositoryId(`repo-${index}`) }));
+  try {
+    const staged = await Promise.all(scopes.map((scope) => cas.stage(bytes, ref, scope))); await Promise.all(staged.map((item) => cas.finalize(item)));
+    for (const scope of scopes) assert.deepEqual([...await cas.read(ref, access.issueRead({ tenantId: scope.tenantId, repositoryId: scope.repositoryId,
+      expiresAt: new Date(Date.now() + 60_000).toISOString() }))], [...bytes]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

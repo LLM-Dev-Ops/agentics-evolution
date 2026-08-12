@@ -26,16 +26,18 @@ export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
     const destination = this.bucket.file(this.finalName(staged.expected));
     try {
       await source.copy(destination, { preconditionOpts: { ifGenerationMatch: 0 } });
-      await destination.setMetadata({ contentType: staged.metadata.mediaType, metadata: encodeMetadata({ ...staged.metadata, sha256: staged.expected.sha256, size: String(staged.size) }) });
+      await mergeScope(destination, staged.metadata, staged.expected.sha256, staged.size);
     } catch (error) {
       if ((error as { code?: number }).code !== 412) throw error;
       await assertFileDigest(destination, staged.size, staged.expected.sha256, "CAS_COLLISION");
+      await mergeScope(destination, staged.metadata, staged.expected.sha256, staged.size);
     }
     await source.delete({ ignoreNotFound: true }); return staged.expected;
   }
   async read(reference: DigestReference, grant: ArtifactReadGrant): Promise<Uint8Array> {
     const verified = await this.access.verifyRead(grant); digestReference(reference); const file = this.bucket.file(this.finalName(reference)); const [metadata] = await file.getMetadata();
-    if (metadata.metadata?.tenantId !== verified.tenantId || metadata.metadata?.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND"); const [bytes] = await file.download();
+    const scopes = JSON.parse(String(metadata.metadata?.scopes ?? "[]")) as Array<{ tenantId: string; repositoryId: string }>;
+    if (!scopes.some((item) => item.tenantId === verified.tenantId && item.repositoryId === verified.repositoryId)) throw new TypeError("ARTIFACT_NOT_FOUND"); const [bytes] = await file.download();
     if (digestBytes(bytes) !== reference.sha256) throw new TypeError("CAS_OBJECT_TAMPERED"); return bytes;
   }
   async exists(reference: DigestReference): Promise<boolean> { return (await this.bucket.file(this.finalName(reference)).exists())[0]; }
@@ -45,7 +47,8 @@ export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
       if (error.code === 404) return [{ metadata: {}, generation: undefined }] as never; throw error;
     });
     if (!metadata.generation) return;
-    if (metadata.metadata?.tenantId !== verified.tenantId || metadata.metadata?.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND");
+    const scopes = JSON.parse(String(metadata.metadata?.scopes ?? "[]")) as Array<{ tenantId: string; repositoryId: string }>;
+    if (!scopes.some((item) => item.tenantId === verified.tenantId && item.repositoryId === verified.repositoryId)) throw new TypeError("ARTIFACT_NOT_FOUND");
     await file.delete({ ifGenerationMatch: Number(metadata.generation) });
   }
   async readiness(): Promise<void> {
@@ -55,6 +58,15 @@ export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
     if (!metadata.versioning?.enabled) throw new TypeError("GCS_BUCKET_VERSIONING_REQUIRED");
   }
   private finalName(reference: DigestReference): string { return `${this.prefix}/sha256/${reference.sha256.slice(0, 2)}/${reference.sha256}`; }
+}
+async function mergeScope(file: ReturnType<Bucket["file"]>, metadata: ArtifactWriteMetadata, digest: string, size: number): Promise<void> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const [current] = await file.getMetadata(); const scopes = JSON.parse(String(current.metadata?.scopes ?? "[]")) as Array<{ tenantId: string; repositoryId: string }>;
+    if (!scopes.some((item) => item.tenantId === metadata.tenantId && item.repositoryId === metadata.repositoryId)) scopes.push({ tenantId: metadata.tenantId, repositoryId: metadata.repositoryId });
+    try { await file.setMetadata({ contentType: metadata.mediaType, metadata: encodeMetadata({ sha256: digest, size: String(size), scopes }) },
+      { preconditionOpts: { ifMetagenerationMatch: Number(current.metageneration) } }); return; }
+    catch (error) { if ((error as { code?: number }).code !== 412 || attempt === 7) throw error; }
+  }
 }
 async function assertFileDigest(file: ReturnType<Bucket["file"]>, expectedSize: number, expectedDigest: string, failure: string): Promise<void> {
   const hash = createHash("sha256"); let size = 0;

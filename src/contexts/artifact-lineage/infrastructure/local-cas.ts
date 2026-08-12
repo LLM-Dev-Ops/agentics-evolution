@@ -23,7 +23,7 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
   }
   async finalize(staged: StagedArtifact): Promise<DigestReference> {
     const path = this.stagePath(staged.stageId); const bytes = await readFile(path); if (bytes.byteLength !== staged.size || digestBytes(bytes) !== staged.expected.sha256) throw new TypeError("STAGED_ARTIFACT_TAMPERED");
-    const destination = this.finalPath(staged.expected); await mkdir(dirname(destination), { recursive: true });
+    return this.withDigestLock(staged.expected.sha256, async () => { const destination = this.finalPath(staged.expected); await mkdir(dirname(destination), { recursive: true });
     try { await link(path, destination); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
       const current = await readFile(destination); if (digestBytes(current) !== staged.expected.sha256) throw new TypeError("CAS_COLLISION"); await rm(path, { force: true });
@@ -36,7 +36,7 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
         current.scopes.push(scope); await writeFile(metadataPath, JSON.stringify(current), { mode: 0o600 });
       }
     });
-    await rm(`${path}.json`, { force: true }); return staged.expected;
+    await rm(`${path}.json`, { force: true }); return staged.expected; });
   }
   async read(reference: DigestReference, grant: ArtifactReadGrant): Promise<Uint8Array> {
     const verified = await this.access.verifyRead(grant); digestReference(reference); const path = this.finalPath(reference); const metadata = JSON.parse(await readFile(`${path}.json`, "utf8"));
@@ -46,14 +46,20 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
   async exists(reference: DigestReference): Promise<boolean> { return stat(this.finalPath(reference)).then(() => true, () => false); }
   async delete(reference: DigestReference, token: ArtifactDeleteToken): Promise<void> {
     const verified = await this.access.verifyDelete(token); if (verified.digest !== reference.sha256) throw new TypeError("INVALID_DELETE_TOKEN");
-    const metadataText = await readFile(`${this.finalPath(reference)}.json`, "utf8").catch((error: NodeJS.ErrnoException) => {
+    return this.withDigestLock(reference.sha256, async () => { const metadataText = await readFile(`${this.finalPath(reference)}.json`, "utf8").catch((error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return undefined; throw error;
     });
     if (metadataText === undefined && !await this.exists(reference)) return;
     if (metadataText === undefined) throw new TypeError("CAS_METADATA_MISSING");
     const metadata = JSON.parse(metadataText);
     if (!metadata.scopes?.some((item: { tenantId: string; repositoryId: string }) => item.tenantId === verified.tenantId && item.repositoryId === verified.repositoryId)) throw new TypeError("ARTIFACT_NOT_FOUND");
-    await rm(this.finalPath(reference)); await rm(`${this.finalPath(reference)}.json`, { force: true });
+    await rm(this.finalPath(reference)); await rm(`${this.finalPath(reference)}.json`, { force: true }); });
+  }
+  private async withDigestLock<T>(digest: string, operation: () => Promise<T>): Promise<T> {
+    const path = join(this.root, "locks", digest); await mkdir(dirname(path), { recursive: true }); let handle;
+    for (let attempt = 0; attempt < 200; attempt++) try { handle = await open(path, "wx", 0o600); break; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt === 199) throw error; await new Promise((resolve) => setTimeout(resolve, 5)); }
+    try { return await operation(); } finally { await handle?.close(); await rm(path, { force: true }); }
   }
   private finalPath(reference: DigestReference): string { return join(this.root, "sha256", reference.sha256.slice(0, 2), reference.sha256); }
   private stagePath(stageId: string): string { if (!/^[a-f0-9-]{36}$/.test(stageId)) throw new TypeError("INVALID_STAGE_ID"); return join(this.root, "staging", stageId); }

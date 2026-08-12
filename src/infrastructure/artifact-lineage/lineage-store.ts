@@ -14,6 +14,7 @@ export class ArtifactLineageStore {
   async stage(manifest: ArtifactManifest): Promise<void> {
     if (manifest.status !== "STAGED") throw new TypeError("STAGED_MANIFEST_REQUIRED"); const payload = manifest.payload;
     await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [payload.artifact.sha256]);
       const existing = await client.query("SELECT payload FROM artifact_manifests WHERE tenant_id=$1 AND manifest_digest=$2", [payload.tenantId, manifest.manifestDigest.sha256]);
       if (existing.rowCount) { if (JSON.stringify(existing.rows[0].payload) !== JSON.stringify(payload)) throw new TypeError("MANIFEST_IDEMPOTENCY_CONFLICT"); return; }
       const retainUntil = new Date(Date.parse(payload.createdAt) + MINIMUM_RETENTION_DAYS[payload.retention] * 86_400_000);
@@ -70,18 +71,31 @@ export class ArtifactLineageStore {
         intentId, expiresAt, fencingToken: Number(fenced.rows[0].intent_fence) };
       });
       if (!intent) continue; const ref = digestReference({ uri: `cas://sha256/${intent.digest}`, sha256: intent.digest });
-      await this.cas.delete(ref, this.access.issueDelete({ tenantId: parseTenantId(tenantId), repositoryId: parseRepositoryId(intent.repositoryId), digest: intent.digest, intentId: intent.intentId, expiresAt: intent.expiresAt, fencingToken: intent.fencingToken }));
-      await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
+      const client = await this.database.pool.connect();
+      try { await client.query("BEGIN ISOLATION LEVEL SERIALIZABLE"); await client.query("SELECT set_config('app.tenant_id',$1,true)", [tenantId]);
+        await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [intent.digest]);
+        const blocked = await client.query("SELECT artifact_digest_has_other_live_reference($1,$2,$3) AS blocked", [intent.digest, tenantId, candidate.manifest_digest]);
+        if (blocked.rows[0]?.blocked) { await client.query("ROLLBACK"); continue; }
+        await this.cas.delete(ref, this.access.issueDelete({ tenantId: parseTenantId(tenantId), repositoryId: parseRepositoryId(intent.repositoryId), digest: intent.digest, intentId: intent.intentId, expiresAt: intent.expiresAt, fencingToken: intent.fencingToken }));
         const result = await client.query(`UPDATE artifact_manifests SET version=version+1,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND manifest_digest=$2
           AND version=$3 AND legal_hold=false RETURNING version`, [tenantId, candidate.manifest_digest, candidate.version]);
         if (!result.rowCount) throw new TypeError("GC_DELETE_INTENT_STALE");
         await client.query("UPDATE artifact_digest_references SET live=false,released_at=transaction_timestamp() WHERE tenant_id=$1 AND manifest_digest=$2", [tenantId, candidate.manifest_digest]);
         await client.query("UPDATE artifact_gc_candidates SET deleted_at=transaction_timestamp() WHERE tenant_id=$1 AND run_id=$2 AND manifest_digest=$3 AND intent_id=$4", [tenantId, runId, candidate.manifest_digest, intent.intentId]);
-        await statusEvent(client, tenantId, candidate.manifest_digest, Number(result.rows[0].version), "DELETED", "unreachable retention-expired artifact swept", actor); swept++;
-      });
+        await statusEvent(client, tenantId, candidate.manifest_digest, Number(result.rows[0].version), "DELETED", "unreachable retention-expired artifact swept", actor); await client.query("COMMIT"); swept++;
+      } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
     }
     await this.database.tenantTransaction(tenantId, "SERIALIZABLE", (client) => client.query("UPDATE artifact_gc_runs SET status='COMPLETED',swept=$3,completed_at=transaction_timestamp() WHERE tenant_id=$1 AND run_id=$2", [tenantId, runId, swept]).then(() => undefined));
     return { marked: candidates.length, swept };
+  }
+  async reconcilePendingGcIntents(tenantId: string, actor: string, now = new Date()): Promise<{ marked: number; swept: number }> {
+    await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
+      await client.query(`UPDATE artifact_gc_runs r SET status='ABORTED',completed_at=transaction_timestamp()
+        WHERE r.tenant_id=$1 AND r.status IN ('MARKING','SWEEPING') AND EXISTS (
+          SELECT 1 FROM artifact_gc_candidates c WHERE c.tenant_id=r.tenant_id AND c.run_id=r.run_id
+          AND c.intent_id IS NOT NULL AND c.deleted_at IS NULL AND c.intent_expires_at<=$2)`, [tenantId, now]);
+    });
+    return this.garbageCollect(tenantId, `${actor}:gc-reconcile`, now);
   }
 }
 async function statusEvent(client: pg.PoolClient, tenantId: string, digest: string, version: number, status: string, reason: string, actor: string) {
