@@ -10,6 +10,7 @@ import {
   validateUpstreamEvidence
 } from "../dist/application/ports/acl-contract.js";
 import { canonicalJson, mapUpstreamError, negotiateVersion, withDeadline } from "../dist/upstream/contract.js";
+import { newCorrelationId, repositoryId, tenantId, utcInstant } from "../dist/index.js";
 
 const EXPECTED_PORTS = [
   "HarnessAnalysisPort", "DarwinEvolutionPort", "FlywheelProofPort",
@@ -45,9 +46,12 @@ test("read paths preserve unknown values while write paths fail closed", () => {
 
 test("call context and upstream evidence bind correlation, exact version, and capability digest", () => {
   const signal = new AbortController().signal;
-  validateCallContext({ tenantId: "tenant", repositoryId: "repo", correlationId: "corr", deadline: "2030-01-01T00:00:00.000Z", signal });
-  validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.1", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId: "corr" }, "corr");
-  assert.throws(() => validateUpstreamEvidence({ authority: "darwin", exactVersion: "latest", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId: "corr" }, "corr"), /version/);
+  const correlationId = newCorrelationId();
+  validateCallContext({ tenantId: tenantId("tenant"), repositoryId: repositoryId("repo"), correlationId, deadline: utcInstant("2099-01-01T00:00:00.000Z"), signal });
+  const expected = { authority: "darwin", exactVersion: "0.9.1", correlationId };
+  validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.1", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected);
+  assert.throws(() => validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.2", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected), /version/);
+  assert.throws(() => validateUpstreamEvidence({ authority: "other", exactVersion: "0.9.1", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected), /authority/);
 });
 
 test("each ACL passes golden, error, deadline, cancellation, and version contracts", async () => {

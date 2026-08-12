@@ -3,25 +3,22 @@ export type ReadValue<T> =
   | { readonly kind: "UNRECOGNIZED"; readonly rawValue: string };
 
 export interface UpstreamCallContext {
-  readonly tenantId: string;
-  readonly repositoryId: string;
-  readonly correlationId: string;
-  readonly causationId?: string;
-  readonly deadline: string;
+  readonly tenantId: TenantId;
+  readonly repositoryId: RepositoryId;
+  readonly correlationId: CorrelationId;
+  readonly causationId?: CausationId;
+  readonly deadline: UtcInstant;
   readonly signal: AbortSignal;
 }
 
 export interface UpstreamEvidence {
   readonly authority: string;
   readonly exactVersion: string;
-  readonly capabilityDigest: `sha256:${string}`;
-  readonly correlationId: string;
+  readonly capabilityDigest: `sha256:${Sha256Digest}`;
+  readonly correlationId: CorrelationId;
 }
 
-export interface ArtifactReference {
-  readonly uri: `cas://sha256/${string}`;
-  readonly sha256: string;
-}
+export type ArtifactReference = DigestReference;
 
 export interface PortResponse<T> {
   readonly data: T;
@@ -48,19 +45,17 @@ export const ACL_PORT_CONTRACTS = {
 } as const;
 
 export function validateCallContext(context: UpstreamCallContext): void {
-  for (const [field, value] of Object.entries({
-    tenantId: context.tenantId,
-    repositoryId: context.repositoryId,
-    correlationId: context.correlationId,
-    deadline: context.deadline
-  })) if (value.trim().length === 0) throw new TypeError(`${field} must be non-empty`);
-  const deadline = Date.parse(context.deadline);
-  if (!Number.isFinite(deadline) || !context.deadline.endsWith("Z")) throw new TypeError("deadline must be an RFC3339 UTC instant");
+  tenantId(context.tenantId); repositoryId(context.repositoryId); correlationId(context.correlationId);
+  if (context.causationId) causationId(context.causationId);
+  const deadline = Date.parse(utcInstant(context.deadline));
+  if (deadline <= Date.now()) throw new TypeError("deadline must be in the future");
   if (context.signal.aborted) throw context.signal.reason ?? new DOMException("cancelled", "AbortError");
 }
 
-export function validateUpstreamEvidence(evidence: UpstreamEvidence, expectedCorrelationId: string): void {
-  if (evidence.correlationId !== expectedCorrelationId) throw new Error("INCOMPATIBLE: upstream correlation mismatch");
+export function validateUpstreamEvidence(evidence: UpstreamEvidence, expected: Readonly<{ correlationId: CorrelationId; authority: string; exactVersion: string }>): void {
+  if (evidence.correlationId !== expected.correlationId) throw new Error("INCOMPATIBLE: upstream correlation mismatch");
+  if (evidence.authority !== expected.authority) throw new Error("INCOMPATIBLE: upstream authority mismatch");
+  if (evidence.exactVersion !== expected.exactVersion) throw new Error("INCOMPATIBLE: upstream version mismatch");
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(evidence.exactVersion))
     throw new Error("INCOMPATIBLE: upstream version is not exact");
   if (!/^sha256:[a-f0-9]{64}$/.test(evidence.capabilityDigest))
@@ -77,3 +72,10 @@ export function requireKnown<T>(value: ReadValue<T>, field: string): T {
   if (value.kind === "UNRECOGNIZED") throw new Error(`INCOMPATIBLE: unrecognized ${field} '${value.rawValue}'`);
   return value.value;
 }
+import type { DigestReference, Sha256Digest } from "../../shared-kernel/digest.js";
+import { repositoryId, tenantId } from "../../shared-kernel/identity.js";
+import type { RepositoryId, TenantId } from "../../shared-kernel/identity.js";
+import { utcInstant } from "../../shared-kernel/time.js";
+import type { UtcInstant } from "../../shared-kernel/time.js";
+import { causationId, correlationId } from "../../shared-kernel/uuid-v7.js";
+import type { CausationId, CorrelationId } from "../../shared-kernel/uuid-v7.js";
