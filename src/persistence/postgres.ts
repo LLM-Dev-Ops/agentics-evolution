@@ -40,6 +40,8 @@ export class PostgresPersistence {
   async executeCommand(write: CommandWrite): Promise<CommandResult> {
     const envelope = write.event; const requestDigest = digestBytes(new TextEncoder().encode(canonicalJson({ expectedVersion: write.expectedVersion, state: write.state, event: envelope })));
     return withSerializableRetry(() => this.tenantTransaction(envelope.tenantId, "SERIALIZABLE", async (client) => {
+      const tombstone = await client.query("SELECT 1 FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2", [envelope.tenantId,envelope.repositoryId]);
+      if (tombstone.rowCount) throw new TypeError("REPOSITORY_TOMBSTONED");
       const existing = await client.query<{ request_digest: string; response: CommandResult }>(
         "SELECT request_digest,response FROM command_idempotency WHERE tenant_id=$1 AND idempotency_key=$2", [envelope.tenantId, envelope.idempotencyKey]);
       if (existing.rowCount) {

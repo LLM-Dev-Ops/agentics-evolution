@@ -62,7 +62,7 @@ test("classification, provider, residency and namespace helpers fail closed", ()
 test("tombstone deletion requires every boundary and produces a tamper-evident scoped receipt", async () => {
   const tombstone = deletionTombstone({ tenantId: tenantId("tenant-a"), repositoryId: repositoryId("repo-a"), requestId: "delete-0001", requestedAt: "2027-01-15T08:00:00.000Z", policyEpoch: 7 });
   const categories = ["DATABASE", "ARTIFACT", "EVENT", "CACHE", "VECTOR", "KEY", "BACKUP_OBLIGATION"];
-  const boundaries = categories.map(category => ({ category, delete: async value => ({ category, removed: value.tenantId === "tenant-a" ? 1 : 0, retained: category === "BACKUP_OBLIGATION" ? 1 : 0, held: 0, digest: category.toLowerCase().padEnd(64, "0").slice(0, 64) }) }));
+  const boundaries = categories.map(category => ({ category, delete: async (value, operationKey) => ({ category,operationKey,tenantId:value.tenantId,repositoryId:value.repositoryId,requestId:value.requestId,removed:value.tenantId === "tenant-a"?1:0,retained:category === "BACKUP_OBLIGATION"?1:0,held:0,digest:"a".repeat(64),acknowledgementDigest:"b".repeat(64) }), verify: async value => value.acknowledgementDigest === "b".repeat(64) }));
   const signing = generateKeyPairSync("ed25519"); const signer = new Ed25519DeletionReceiptSigner("delete-key/1", signing.privateKey.export({ type: "pkcs8", format: "pem" }));
   const receipt = await new DeletionCoordinator(boundaries, signer, () => new Date("2027-01-15T08:01:00.000Z")).execute(tombstone);
   const verifier = new Ed25519DeletionReceiptVerifier({ "delete-key/1": signing.publicKey.export({ type: "spki", format: "pem" }) }); assert.equal(verifier.verify(receipt), true); assert.equal(receipt.payload.results.length, 7);
