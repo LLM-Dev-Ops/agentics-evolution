@@ -43,10 +43,12 @@ const histories = Array.from({ length: 2_500 }, (_, historyIndex) => {
   const scoped = { ...identity, aggregateId: aggregateId(`benchmark-aggregate-${historyIndex}`) };
   const history = ["HypothesisProposed", "CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"].map((type, step) => {
     const base = createEnvelope({ ...envelope, ...scoped, id: newEventId(), type, evidence: [], idempotencyKey: newIdempotencyKey(), occurredAt: utcInstant(`2026-08-12T00:00:0${step}.000Z`) });
+    const gateDigest = digestBytes(evidenceBytes); const nestedReference = digestReference({ uri: `cas://sha256/${gateDigest}`, sha256: gateDigest });
+    evidenceStore.set(nestedReference.uri, evidenceBytes);
     const authority = authorityNames[step]; const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-benchmark`, authority,
       eventBinding: transitionEventBinding(base), verdict: ["VALIDATED", "ADMITTED", "PROVED", "AUTHORIZED"][step],
       proof: step === 0 ? { sourceValidated: true } : step === 1 ? { mutationAdmitted: true }
-        : step === 2 ? { gateReceipt: `cas://sha256/${"b".repeat(64)}`, replayVerdict: "PASS", sequentialEvidence: `cas://sha256/${"c".repeat(64)}` }
+        : step === 2 ? { gateReceipt: nestedReference, replayVerdict: "PASS", sequentialEvidence: nestedReference }
         : { approvalId: "benchmark-approval", capability: "PROMOTE", constraints: {} } };
     const bytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature: sign(null, Buffer.from(canonicalJson(statement)), keys.privateKey).toString("base64") }));
     const digest = digestBytes(bytes); const signedReference = digestReference({ uri: `cas://sha256/${digest}`, sha256: digest }); evidenceStore.set(signedReference.uri, bytes);

@@ -43,6 +43,10 @@ export function applyTrustEvent(state: TrustAggregate, event: EvolutionEnvelope,
       const bytes = resolveEvidence(reference);
       verifyDigest(reference, bytes);
       if (!verifier.verify({ authority: requiredAuthority, event, reference, bytes })) throw new TypeError(`${requiredAuthority} signed authority evidence rejected`);
+      if (requiredAuthority === "Flywheel") {
+        const proof = verifier.parseVerifiedProof(bytes);
+        for (const nested of [proof.gateReceipt, proof.sequentialEvidence] as DigestReference[]) verifyDigest(nested, resolveEvidence(nested));
+      }
     }
     const evidence: TransitionEvidence = nextCommand === "ProposeHypothesis" ? { sourceValidated: true }
       : nextCommand === "GenerateCandidate" ? { mutationAdmitted: true }

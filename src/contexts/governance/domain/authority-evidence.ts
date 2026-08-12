@@ -1,5 +1,5 @@
 import { KeyObject, createPublicKey, verify } from "node:crypto";
-import { DigestReference } from "../../../shared-kernel/digest.js";
+import { DigestReference, digestReference } from "../../../shared-kernel/digest.js";
 import { EvolutionEnvelope } from "../../../shared-kernel/evolution-envelope.js";
 import { canonicalJson } from "../../../shared-kernel/immutable.js";
 import { digestBytes, sha256Digest } from "../../../shared-kernel/digest.js";
@@ -53,14 +53,21 @@ export class Ed25519AuthorityEvidenceVerifier {
     const proofKeys = authority === "Dream" ? ["sourceValidated"] : authority === "Darwin" ? ["mutationAdmitted"]
       : authority === "Flywheel" ? ["gateReceipt", "replayVerdict", "sequentialEvidence"] : ["approvalId", "capability", "constraints"];
     if (Object.keys(statement.proof).sort().join(",") !== [...proofKeys].sort().join(",")) return false;
-    const isCas = (value: unknown) => typeof value === "string" && /^cas:\/\/sha256\/[a-f0-9]{64}$/.test(value);
+    const isDigestRef = (value: unknown) => {
+      try { digestReference(value as DigestReference); return true; } catch { return false; }
+    };
     if ((authority === "Dream" && statement.proof.sourceValidated !== true) ||
       (authority === "Darwin" && statement.proof.mutationAdmitted !== true) ||
-      (authority === "Flywheel" && (!isCas(statement.proof.gateReceipt) || statement.proof.replayVerdict !== "PASS" || !isCas(statement.proof.sequentialEvidence))) ||
+      (authority === "Flywheel" && (!isDigestRef(statement.proof.gateReceipt) || statement.proof.replayVerdict !== "PASS" || !isDigestRef(statement.proof.sequentialEvidence))) ||
       (authority === "Governance" && (typeof statement.proof.approvalId !== "string" || statement.proof.approvalId.length < 3 ||
         !["PROMOTE", "REVOKE"].includes(String(statement.proof.capability)) || !statement.proof.constraints || typeof statement.proof.constraints !== "object" || Array.isArray(statement.proof.constraints)))) return false;
+    if (authority === "Governance" && statement.proof.capability !== (event.type === "AuthorizationRevoked" ? "REVOKE" : "PROMOTE")) return false;
     const unsigned = canonicalJson({ schema: statement.schema, keyId: statement.keyId, authority: statement.authority,
       eventBinding: sha256Digest(statement.eventBinding), verdict: statement.verdict, proof: statement.proof });
     return verify(null, Buffer.from(unsigned), root.key, Buffer.from(statement.signature, "base64"));
+  }
+
+  parseVerifiedProof(bytes: Uint8Array): Readonly<Record<string, unknown>> {
+    return Object.freeze({ ...(JSON.parse(new TextDecoder().decode(bytes)) as AuthorityEvidenceStatement).proof });
   }
 }
