@@ -7,8 +7,6 @@ export interface PayloadSchema {
   readonly allowedFields: readonly string[];
   readonly requiredFields?: readonly string[];
   readonly compatibleReaderVersions?: readonly number[];
-  readonly validatorId?: string;
-  readonly validate?: (payload: Readonly<Record<string, unknown>>) => void;
 }
 export class EnvelopeSchemaRegistry {
   readonly #schemas = new Map<string, PayloadSchema>();
@@ -16,7 +14,6 @@ export class EnvelopeSchemaRegistry {
     if (!/^agentics\.[a-z0-9.-]+\/v\d+$/.test(schema.schemaId)) throw new TypeError("payload schema requires versioned schemaId");
     const key = `${ENVELOPE_SCHEMA}:${eventType}@${schemaVersion}`;
     if (this.#schemas.has(key)) throw new TypeError(`schema already registered: ${key}`);
-    if (schema.validate && !/^sha256:[a-f0-9]{64}$/.test(schema.validatorId ?? "")) throw new TypeError("custom validator requires content-addressed validatorId");
     this.#schemas.set(key, Object.freeze({ ...schema, allowedFields: Object.freeze([...schema.allowedFields]), requiredFields: Object.freeze([...(schema.requiredFields ?? [])]),
       compatibleReaderVersions: Object.freeze([...(schema.compatibleReaderVersions ?? [schemaVersion])]) }));
   }
@@ -27,7 +24,6 @@ export class EnvelopeSchemaRegistry {
     if (!envelope.payload || typeof envelope.payload !== "object" || Array.isArray(envelope.payload)) throw new TypeError("payload must be a plain object");
     for (const field of Object.keys(envelope.payload)) if (!schema.allowedFields.includes(field)) throw new TypeError(`unknown critical payload field: ${field}`);
     for (const field of schema.requiredFields ?? []) if (!Object.hasOwn(envelope.payload, field)) throw new TypeError(`missing required payload field: ${field}`);
-    schema.validate?.(envelope.payload);
   }
   negotiateReader(eventType: string, writerVersion: number, supportedReaders: readonly number[]): number {
     const schema = this.#schemas.get(`${ENVELOPE_SCHEMA}:${eventType}@${writerVersion}`);
@@ -37,6 +33,6 @@ export class EnvelopeSchemaRegistry {
     return selected;
   }
   digest(): string { return digestBytes(new TextEncoder().encode(canonicalJson([...this.#schemas].map(([key, schema]) => ({ key, schemaId: schema.schemaId,
-    validatorId: schema.validatorId ?? null, allowedFields: schema.allowedFields, requiredFields: schema.requiredFields ?? [],
+    allowedFields: schema.allowedFields, requiredFields: schema.requiredFields ?? [],
     compatibleReaderVersions: schema.compatibleReaderVersions ?? [] })).sort((a, b) => a.key.localeCompare(b.key))))); }
 }

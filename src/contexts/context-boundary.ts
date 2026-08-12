@@ -14,20 +14,21 @@ export interface ContextDescriptor {
 export interface AggregateScope<TTenantId = TenantId, TRepositoryId = RepositoryId> {
   readonly tenantId: TTenantId;
   readonly repositoryId: TRepositoryId;
+  readonly aggregateId: AggregateId;
 }
 
 export function hasAggregateScope(value: Partial<AggregateScope>): value is AggregateScope {
-  return value.tenantId !== undefined && value.repositoryId !== undefined;
+  return value.tenantId !== undefined && value.repositoryId !== undefined && value.aggregateId !== undefined;
 }
 
 export function assertSameAggregateScope(
   expected: AggregateScope,
   actual: AggregateScope
 ): void {
-  if (expected.tenantId !== actual.tenantId || expected.repositoryId !== actual.repositoryId) {
+  if (expected.tenantId !== actual.tenantId || expected.repositoryId !== actual.repositoryId || expected.aggregateId !== actual.aggregateId) {
     throw new TypeError("aggregate tenant/repository scope mismatch");
   }
 }
 
 export type ScopedAggregate = AggregateIdentity;
-import type { AggregateIdentity, RepositoryId, TenantId } from "../shared-kernel/identity.js";
+import type { AggregateId, AggregateIdentity, RepositoryId, TenantId } from "../shared-kernel/identity.js";

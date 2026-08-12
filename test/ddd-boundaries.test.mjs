@@ -98,3 +98,10 @@ test("rejects mutable aggregate ID and accepts immutable past-tense event", asyn
   }));
   assert.equal(accepted.status, 0, accepted.stderr);
 });
+
+test("rejects mutable type-alias events that bypass DomainEvent inheritance", async () => {
+  const result = validate(await fixture({
+    "src/contexts/dream/published-language.ts": "export type MutableEvent = { aggregateId: string; tenantId: string; repositoryId: string };\n"
+  }));
+  expectFailure(result, /must use EvolutionEnvelope/);
+});

@@ -83,6 +83,15 @@ function checkReference(file, specifier, isExport) {
 }
 function checkEvents(ast, location) {
   const inspect = (node) => {
+    if (ts.isTypeAliasDeclaration(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) && /(?:Event|ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(node.name.text)) {
+      const representation = node.type.getText(ast);
+      if (!/(?:^|\W)EvolutionEnvelope\s*</.test(representation))
+        errors.push(`${location}: published event alias '${node.name.text}' must use EvolutionEnvelope`);
+      if (!/(?:ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(node.name.text))
+        errors.push(`${location}: published event alias '${node.name.text}' must use a past-tense name`);
+      if (!/readonly\s+type\s*:/.test(representation))
+        errors.push(`${location}: published event alias '${node.name.text}' must carry readonly literal type`);
+    }
     const heritage = node.heritageClauses?.flatMap((clause) => clause.types) ?? [];
     const isEvent = (ts.isInterfaceDeclaration(node) || ts.isClassDeclaration(node)) &&
       heritage.some((type) => type.expression.getText(ast).endsWith("DomainEvent"));

@@ -103,8 +103,7 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
   assert.deepEqual(encodeEnvelope(value), encodeEnvelope(structuredClone(value)));
   assert.throws(() => createEnvelope({ ...value, surprise: true }), /unknown critical/);
   const registry = new EnvelopeSchemaRegistry();
-  registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId"],
-    compatibleReaderVersions: [1], validatorId: `sha256:${"d".repeat(64)}`, validate: (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); } });
+  registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId"], compatibleReaderVersions: [1] });
   registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, { schemaId: "agentics.trust-payload/v1", allowedFields: [] }), /already/);
   assert.deepEqual(decodeEnvelope(encodeEnvelope(value), registry), value);
   assert.throws(() => decodeEnvelope(new TextEncoder().encode("not json"), registry), /INVALID_ENVELOPE_JSON/);
