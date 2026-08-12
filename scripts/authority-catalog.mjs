@@ -1,0 +1,72 @@
+import { access, readFile } from "node:fs/promises";
+import { parse } from "yaml";
+
+const EXACT_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
+const INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/;
+const NAME = /^[a-z0-9][a-z0-9-]*$/;
+
+function nonEmptyStrings(value, path, failures) {
+  if (!Array.isArray(value) || value.length === 0) {
+    failures.push(`${path}: expected a non-empty string array`);
+    return;
+  }
+  if (value.some((item) => typeof item !== "string" || item.length === 0))
+    failures.push(`${path}: contains a non-string or empty value`);
+  if (new Set(value).size !== value.length) failures.push(`${path}: contains duplicates`);
+}
+
+function validatePackage(entry, path, { authority = false } = {}) {
+  const failures = [];
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [`${path}: expected an object`];
+  if (typeof entry.name !== "string" || !NAME.test(entry.name)) failures.push(`${path}.name: invalid`);
+  if (typeof entry.package !== "string" || entry.package.length === 0) failures.push(`${path}.package: required`);
+  if (typeof entry.version !== "string" || !EXACT_VERSION.test(entry.version)) failures.push(`${path}.version: must be exact`);
+  if (typeof entry.integrity !== "string" || !INTEGRITY.test(entry.integrity)) failures.push(`${path}.integrity: invalid sha512`);
+  if (typeof entry.owner !== "string" || entry.owner.length === 0) failures.push(`${path}.owner: required`);
+  nonEmptyStrings(entry.contractTests, `${path}.contractTests`, failures);
+  if (!Array.isArray(entry.requiredExports)) failures.push(`${path}.requiredExports: expected an array`);
+  else if (new Set(entry.requiredExports).size !== entry.requiredExports.length) failures.push(`${path}.requiredExports: contains duplicates`);
+  if (authority) {
+    if (!['cli', 'module'].includes(entry.probe)) failures.push(`${path}.probe: expected cli or module`);
+    if (typeof entry.adapter !== "string" || !entry.adapter.startsWith("infrastructure/upstream-")) failures.push(`${path}.adapter: invalid`);
+    nonEmptyStrings(entry.requiredCapabilities, `${path}.requiredCapabilities`, failures);
+    nonEmptyStrings(entry.upstreamAdrs, `${path}.upstreamAdrs`, failures);
+    if (!Array.isArray(entry.deviations)) failures.push(`${path}.deviations: expected an array`);
+    for (const [index, deviation] of (entry.deviations ?? []).entries()) {
+      for (const field of ["owner", "expiresAt", "threatAnalysis", "adr"])
+        if (typeof deviation?.[field] !== "string" || deviation[field].length === 0)
+          failures.push(`${path}.deviations[${index}].${field}: required`);
+      if (typeof deviation?.expiresAt === "string" && Number.isNaN(Date.parse(deviation.expiresAt)))
+        failures.push(`${path}.deviations[${index}].expiresAt: invalid date`);
+    }
+  }
+  return failures;
+}
+
+export async function loadAuthorityCatalog(path = "config/upstream-authorities.yaml") {
+  const text = await readFile(path, "utf8");
+  const catalog = parse(text);
+  const failures = [];
+  if (catalog?.schemaVersion !== "agentics.upstream-authorities/v1") failures.push("schemaVersion: unsupported");
+  if (typeof catalog?.node !== "string" || !EXACT_VERSION.test(catalog.node)) failures.push("node: must be exact");
+  if (catalog?.policy?.unknownExports !== "reject") failures.push("policy.unknownExports: must reject");
+  if (catalog?.policy?.missingCapabilities !== "reject") failures.push("policy.missingCapabilities: must reject");
+  if (catalog?.policy?.deviationsRequireExpiry !== true) failures.push("policy.deviationsRequireExpiry: must be true");
+  if (!Array.isArray(catalog?.authorities) || catalog.authorities.length === 0) failures.push("authorities: required");
+  if (!Array.isArray(catalog?.hosts) || catalog.hosts.length === 0) failures.push("hosts: required");
+  for (const [index, authority] of (catalog?.authorities ?? []).entries())
+    failures.push(...validatePackage(authority, `authorities[${index}]`, { authority: true }));
+  for (const [index, host] of (catalog?.hosts ?? []).entries())
+    failures.push(...validatePackage(host, `hosts[${index}]`));
+  const entries = [...(catalog?.authorities ?? []), ...(catalog?.hosts ?? [])];
+  for (const key of ["name", "package"])
+    if (new Set(entries.map((entry) => entry[key])).size !== entries.length) failures.push(`${key}: duplicate catalog entry`);
+  for (const entry of entries)
+    for (const testPath of entry.contractTests ?? [])
+      try { await access(testPath); } catch { failures.push(`${entry.name}: contract test missing: ${testPath}`); }
+  return { catalog, text, failures };
+}
+
+export function lockEntry(lock, packageName) {
+  return lock.packages?.[`node_modules/${packageName}`];
+}

@@ -1,17 +1,134 @@
 schemaVersion: agentics.upstream-authorities/v1
-node: 20.19.5
+node: "20.19.5"
+policy:
+  unknownExports: reject
+  missingCapabilities: reject
+  deviationsRequireExpiry: true
 authorities:
-  - { name: ruflo, package: ruflo, version: 3.38.0, adapter: infrastructure/upstream-ruflo, capabilities: [swarm, hooks, workers, memory, reasoning-bank, nightly-learner] }
-  - { name: metaharness, package: metaharness, version: 0.4.5, adapter: infrastructure/upstream-metaharness, capabilities: [analyze, scaffold, hosts] }
-  - { name: darwin, package: "@metaharness/darwin", version: 0.9.1, adapter: infrastructure/upstream-darwin, capabilities: [evolve, inspectVariant, validateGeneratedCode] }
-  - { name: flywheel, package: "@metaharness/flywheel", version: 0.1.10, adapter: infrastructure/upstream-flywheel, capabilities: [gate, signer, receipt, lineage, replay] }
-  - { name: redblue, package: "@metaharness/redblue", version: 0.1.4, adapter: infrastructure/upstream-redblue, capabilities: [safety, baseline, retest, report] }
-  - { name: turn-credit, package: "@metaharness/turn-credit", version: 0.1.0, adapter: infrastructure/upstream-turn-credit, capabilities: [trajectory, credit, receipt] }
-  - { name: router, package: "@metaharness/router", version: 0.4.0, adapter: infrastructure/upstream-router, capabilities: [route, calibration, train] }
-  - { name: harness, package: "@metaharness/harness", version: 0.2.0, adapter: infrastructure/upstream-harness, capabilities: [kernel, verifier, recovery] }
-  - { name: ruvector, package: ruvector, version: 0.2.41, adapter: infrastructure/upstream-ruvector, capabilities: [native, rvf, sona] }
+  - name: ruflo
+    package: ruflo
+    version: "3.38.0"
+    integrity: sha512-Ao7IgSPwd5+OBf4pte40I+j6ntcUxeSHuWhSg3XqdsJxBhou1n2fkCipP8dqeen2tQi8flJoybegtwYgwZt+Zw==
+    adapter: infrastructure/upstream-ruflo
+    owner: platform-orchestration
+    probe: cli
+    requiredExports: []
+    requiredCapabilities: [swarm, hooks, daemon, memory]
+    upstreamAdrs: [ADR-150, ADR-153, ADR-322, ADR-331, ADR-381]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: metaharness
+    package: metaharness
+    version: "0.4.5"
+    integrity: sha512-ZFTtAyx0gxc4BDmqdZBaOEwy+PIcVkV1kXcEUe9uuWAOCZiEu35mHrlyyhG/AdCtY1zBJTMaGaOAH1yJzjsrYA==
+    adapter: infrastructure/upstream-metaharness
+    owner: platform-evolution
+    probe: module
+    requiredExports: [HOSTS, loadCatalog, scaffold]
+    requiredCapabilities: [hosts, catalog, scaffold]
+    upstreamAdrs: [ADR-322B]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: darwin
+    package: "@metaharness/darwin"
+    version: "0.9.1"
+    integrity: sha512-7vH/Dpv9TBs/v63CVjkUTzkUn1kgGmES36N35l8D8gOEnvDKN40FznS3vSmQLdTiunE7r7HYf3XVNaIHD5Tcww==
+    adapter: infrastructure/upstream-darwin
+    owner: platform-evolution
+    probe: module
+    requiredExports: [evolve, inspectVariant, validateGeneratedCode]
+    requiredCapabilities: [evolve, inspectVariant, validateGeneratedCode]
+    upstreamAdrs: [ADR-322B]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: flywheel
+    package: "@metaharness/flywheel"
+    version: "0.1.10"
+    integrity: sha512-yrLXDXNdf4jKqHlW6QZw3Cy5T0eMMjjaPqn1XB717/Xx/y0Iv9R03W0OhMEiR/kfqMNebRBW1fi6D7inStEyqA==
+    adapter: infrastructure/upstream-flywheel
+    owner: platform-evaluation
+    probe: module
+    requiredExports: [InMemoryLineageStore, makeSigner, meetsPromotionRule, verifyReceipt, verifyReplayBundle]
+    requiredCapabilities: [lineage, signer, gate, receipt, replay]
+    upstreamAdrs: [ADR-322C]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: redblue
+    package: "@metaharness/redblue"
+    version: "0.1.4"
+    integrity: sha512-JaAk6bs3xA7Ks5RnAcZoxI3WfzpYL+Bk262SCI07w82BDOA7C6VxwGM63F7b86lRTKUVjTEnSqf7QZ3uyElT/g==
+    adapter: infrastructure/upstream-redblue
+    owner: platform-security
+    probe: module
+    requiredExports: [buildReport, enforceSafetyLimits, patchAndRetest, runBaseline]
+    requiredCapabilities: [report, safety, retest, baseline]
+    upstreamAdrs: [ADR-322B]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: turn-credit
+    package: "@metaharness/turn-credit"
+    version: "0.1.0"
+    integrity: sha512-A752c0eEYEVodBB8HLOaSvcUMA65TX6/Cru2apZ7EE7aL2FSO74GFbgFWPo85bgqgNuMjhHkl/kG+lkC0TunNA==
+    adapter: infrastructure/upstream-turn-credit
+    owner: platform-evaluation
+    probe: module
+    requiredExports: [buildCreditReceiptPayload, processTrajectory, toMemoryFeedback]
+    requiredCapabilities: [receipt, trajectory, memory-feedback]
+    upstreamAdrs: [ADR-322C]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: router
+    package: "@metaharness/router"
+    version: "0.4.0"
+    integrity: sha512-VOfjHM7AMWwDH41AAMHOHFbH1r898xJqhqyE3G/r8OAxxrMgujX2SZsYkj/eXfBEmoPMhDVRkuO2abxvzCgEUA==
+    adapter: infrastructure/upstream-router
+    owner: platform-model-gateway
+    probe: module
+    requiredExports: [Router, calibrationReport, trainRouter]
+    requiredCapabilities: [route, calibration, train]
+    upstreamAdrs: [ADR-331]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: harness
+    package: "@metaharness/harness"
+    version: "0.2.0"
+    integrity: sha512-j/NLHqgPNre4qTTExvjCjh4/HgmhnVZPSQUfj06dyrlkpXCMFJ2abdPrl5yuFfzBMU0wnfFnFY2qQHQnBlAreg==
+    adapter: infrastructure/upstream-harness
+    owner: platform-evolution
+    probe: module
+    requiredExports: [HarnessKernel, VerifierRegistry, checkGates]
+    requiredCapabilities: [kernel, verifier, gates]
+    upstreamAdrs: [ADR-322B]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
+  - name: ruvector
+    package: ruvector
+    version: "0.2.41"
+    integrity: sha512-6ox6kcONkFxKhOv6yAp6FKonn+WlNQ8t0tnK9xsOJKkQEru1psptGrObPA57VenaZ7pToEUvvgiLJYLc9uukIg==
+    adapter: infrastructure/upstream-ruvector
+    owner: platform-brain
+    probe: module
+    requiredExports: [Sona, createRvfStore, getVersion, isNativeAvailable, isRvfAvailable]
+    requiredCapabilities: [sona, rvf, version, native]
+    upstreamAdrs: [ADR-381]
+    contractTests: [test/upstream-contracts.test.mjs]
+    deviations: []
 hosts:
-  - { package: "@metaharness/host-claude-code", version: 0.1.2 }
-  - { package: "@metaharness/host-codex", version: 0.1.2 }
+  - name: claude-code
+    package: "@metaharness/host-claude-code"
+    version: "0.1.2"
+    integrity: sha512-bKSPNfsgiC8iCTB6s+b5KeWrHgnAtxq04HbUudZuy4ixsSJ2AOrucSLzXuOSD4FHJJ6a1DD1/FsfGjiad8aa5Q==
+    owner: developer-experience
+    requiredExports: [HOST_NAME, adapter, claudeMd, settingsFor]
+    contractTests: [test/upstream-contracts.test.mjs]
+  - name: codex
+    package: "@metaharness/host-codex"
+    version: "0.1.2"
+    integrity: sha512-P3BvwtIBFYnWaD3Vcm5oTcAifjshhg8HIfIog/251oWOoixph0ll9vkyguVtTa8AiBI/ZHhcUBecYBPT/iH/Dw==
+    owner: developer-experience
+    requiredExports: [HOST_NAME, adapter, agentsMarkdown, configToml]
+    contractTests: [test/upstream-contracts.test.mjs]
 knownUnavailable:
-  - { host: prime-agent, reason: "Advertised by MetaHarness HOSTS but not published on npm as of 2026-08-12" }
+  - host: prime-agent
+    reason: Advertised by MetaHarness HOSTS but not published on npm as of 2026-08-12
+    checkedAt: "2026-08-12T00:00:00Z"
