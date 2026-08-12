@@ -6,3 +6,4 @@ test("evidence semantics reject failed, skipped, and missing required assertions
  assert.throws(()=>validateTapEvidence(parseTapEvidence(tap()),["absent control"]),/REQUIRED_SUBTEST_MISSING/);
  assert.doesNotThrow(()=>validateTapEvidence(parseTapEvidence(tap()),["required assertion"]));
 });
+test("evidence semantics count only top-level points and reject nested non-pass directives",()=>{const nested=`TAP version 13\n# Subtest: parent\n    ok 1 - child assertion\n    1..1\nok 1 - parent\n1..1\n# tests 1\n# pass 1\n# fail 0\n# cancelled 0\n# skipped 0\n# todo 0\n`;assert.doesNotThrow(()=>validateTapEvidence(parseTapEvidence(nested),["parent"]));for(const point of ["    not ok 1 - child assertion","    ok 1 - child assertion # SKIP unavailable","    ok 1 - child assertion # TODO later"])assert.throws(()=>validateTapEvidence(parseTapEvidence(nested.replace("    ok 1 - child assertion",point))),/NON_PASS/);});
