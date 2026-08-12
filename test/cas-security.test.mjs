@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -83,3 +83,15 @@ test("expired lock cannot be stolen from a live owner and recovers after SIGKILL
     await pending; assert.equal(await cas.exists(ref), true);
   } finally { child.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
 });
+
+for (const [name, suffix, mode] of [["lease temp before atomic publication", "", "temp"], ["published recovery guard", ".recovery", "guard"]]) {
+  test(`SIGKILL at ${name} cannot wedge future finalize`, async () => {
+    const root = await mkdtemp(join(tmpdir(), "cas-killpoint-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const bytes = new TextEncoder().encode(`kill-${mode}`); const ref = reference(bytes);
+    const staged = await cas.stage(bytes, ref, metadata); const path = join(root, "locks", `${ref.sha256}${suffix}`);
+    if (mode === "guard") { await mkdir(join(root, "locks"), { recursive: true }); await writeFile(join(root, "locks", ref.sha256), JSON.stringify({ ownerId: "dead-owner", pid: 999999, start: "dead", expiresAt: 0 })); }
+    const child = spawn(process.execPath, [new URL("fixtures/cas-lock-owner.mjs", import.meta.url).pathname, path, mode], { stdio: ["ignore", "pipe", "inherit"] });
+    try { await new Promise((resolve) => child.stdout.once("data", resolve)); child.kill("SIGKILL"); await new Promise((resolve) => child.once("exit", resolve));
+      await cas.finalize(staged); assert.equal(await cas.exists(ref), true);
+    } finally { child.kill("SIGKILL"); await rm(root, { recursive: true, force: true }); }
+  });
+}

@@ -56,14 +56,14 @@ export class LocalContentAddressedStorage implements ContentAddressedStoragePort
     await rm(this.finalPath(reference)); await rm(`${this.finalPath(reference)}.json`, { force: true }); });
   }
   private async withDigestLock<T>(digest: string, operation: () => Promise<T>): Promise<T> {
-    const path = join(this.root, "locks", digest); await mkdir(dirname(path), { recursive: true }); let handle; const ownerStart = await processStart(process.pid); const ownerId = randomUUID();
-    for (let attempt = 0; attempt < 400; attempt++) try { handle = await open(path, "wx", 0o600); await handle.writeFile(JSON.stringify({ ownerId, pid: process.pid, start: ownerStart, expiresAt: Date.now() + 30_000 })); await handle.sync(); break; }
+    const path = join(this.root, "locks", digest); await mkdir(dirname(path), { recursive: true }); const ownerStart = await processStart(process.pid); const ownerId = randomUUID();
+    for (let attempt = 0; attempt < 400; attempt++) try { await publishLease(path, { ownerId, pid: process.pid, start: ownerStart, expiresAt: Date.now() + 30_000 }); break; }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST" || attempt === 399) throw error;
       const lease = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
       if (lease && lease.expiresAt <= Date.now() && !await processOwnerAlive(lease.pid, lease.start)) {
         await recoverStaleLease(path, lease.ownerId);
       } else await new Promise((resolve) => setTimeout(resolve, 5)); }
-    try { return await operation(); } finally { await handle?.close(); const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+    try { return await operation(); } finally { const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
       if (current?.ownerId === ownerId) await rm(path, { force: true }); }
   }
   private finalPath(reference: DigestReference): string { return join(this.root, "sha256", reference.sha256.slice(0, 2), reference.sha256); }
@@ -76,9 +76,22 @@ async function processOwnerAlive(pid: number, start: string): Promise<boolean> {
   try { process.kill(pid, 0); return await processStart(pid) === start; } catch { return false; }
 }
 async function recoverStaleLease(path: string, expectedOwner: string): Promise<void> {
-  const recovery = `${path}.recovery`; let guard;
-  try { guard = await open(recovery, "wx", 0o600); await guard.writeFile(expectedOwner); const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+  const recovery = `${path}.recovery`; const guard = { ownerId: randomUUID(), pid: process.pid, start: await processStart(process.pid), expiresAt: Date.now() + 5_000 };
+  try { await acquireRecoveryGuard(recovery, guard); const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
     if (current?.ownerId === expectedOwner && current.expiresAt <= Date.now() && !await processOwnerAlive(current.pid, current.start)) await rm(path, { force: true });
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-  finally { await guard?.close(); if (guard) await rm(recovery, { force: true }); }
+  finally { const current = await readFile(recovery, "utf8").then((value) => JSON.parse(value), () => undefined); if (current?.ownerId === guard.ownerId) await rm(recovery, { force: true }); }
+}
+async function publishLease(path: string, lease: object): Promise<void> {
+  const temporary = `${path}.tmp-${randomUUID()}`; const handle = await open(temporary, "wx", 0o600);
+  try { await handle.writeFile(JSON.stringify(lease)); await handle.sync(); await link(temporary, path); }
+  finally { await handle.close(); await rm(temporary, { force: true }); }
+}
+async function acquireRecoveryGuard(path: string, lease: { ownerId: string; pid: number; start: string; expiresAt: number }): Promise<void> {
+  try { await publishLease(path, lease); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; const current = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+    if (!current || current.expiresAt > Date.now() || await processOwnerAlive(current.pid, current.start)) throw error;
+    const again = await readFile(path, "utf8").then((value) => JSON.parse(value), () => undefined);
+    if (again?.ownerId === current.ownerId) await rm(path, { force: true }); await publishLease(path, lease);
+  }
 }
