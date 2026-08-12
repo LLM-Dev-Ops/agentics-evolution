@@ -1,0 +1,12 @@
+export { assertSameAggregateScope, contextNames, hasAggregateScope } from "./context-boundary.js";
+export type { AggregateScope, ContextDescriptor, ContextName, ScopedAggregate } from "./context-boundary.js";
+export * as ObservationContext from "./observation/index.js";
+export * as DreamContext from "./dream/index.js";
+export * as EvolutionContext from "./evolution/index.js";
+export * as EvaluationContext from "./evaluation/index.js";
+export * as GovernanceContext from "./governance/index.js";
+export * as OperationsContext from "./operations/index.js";
+export * as BrainKnowledgeContext from "./brain-knowledge/index.js";
+export * as RepositoryIntegrationContext from "./repository-integration/index.js";
+export * as ArtifactLineageContext from "./artifact-lineage/index.js";
+export * as EvaluationCorpusContext from "./evaluation-corpus/index.js";
