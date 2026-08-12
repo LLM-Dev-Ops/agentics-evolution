@@ -1,0 +1,74 @@
+import { createPublicKey, verify } from "node:crypto";
+import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
+import { canonicalJson, deepFreeze } from "../shared-kernel/immutable.js";
+import type { PostgresLocalTransport } from "./postgres-local-transport.js";
+import type { TransportMessage } from "./transport.js";
+import type { EventTransport } from "./transport.js";
+
+const replayCapabilityBrand: unique symbol = Symbol("VerifiedReplayCapability");
+export interface ReplayCapabilityStatement { readonly schema: "agentics.replay-capability/v1"; readonly replayId: string; readonly issuer: string;
+  readonly tenantId: string; readonly repositoryId: string; readonly eventTypes: readonly string[]; readonly expiresAt: string;
+  readonly purpose: "REPLAY" | "REDRIVE"; readonly eventId: string | null; readonly sourceTopic: string | null;
+  readonly payloadSha256: string | null; readonly orderingKey: string | null; readonly subscription: string | null; }
+export interface VerifiedReplayCapability { readonly [replayCapabilityBrand]: true; readonly statement: ReplayCapabilityStatement; }
+export interface ReplayEffectPolicy { readonly replay: true; readonly replayId: string; readonly allowExternalEffects: boolean;
+  readonly allowNormalTopicPublish: false; readonly tenantId: string; readonly repositoryId: string; }
+
+export class ReplayCapabilityVerifier {
+  readonly #keys: ReadonlyMap<string, ReturnType<typeof createPublicKey>>;
+  constructor(keys: Readonly<Record<string, string>>) {
+    this.#keys = new Map(Object.entries(keys).map(([issuer, pem]) => [issuer, createPublicKey(pem)]));
+    if (!this.#keys.size) throw new TypeError("REPLAY_TRUST_ROOT_REQUIRED"); Object.freeze(this);
+  }
+  verify(statementBytes: Uint8Array, signature: Uint8Array): VerifiedReplayCapability {
+    if (statementBytes.byteLength > 16_384 || signature.byteLength !== 64) throw new TypeError("INVALID_REPLAY_CAPABILITY");
+    let value: unknown; try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(statementBytes)); } catch { throw new TypeError("INVALID_REPLAY_CAPABILITY"); }
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("INVALID_REPLAY_CAPABILITY");
+    const statement = value as ReplayCapabilityStatement;
+    const keys = Object.keys(statement).sort(); const expected = ["eventId","eventTypes","expiresAt","issuer","orderingKey","payloadSha256","purpose","replayId","repositoryId","schema","sourceTopic","subscription","tenantId"].sort();
+    if (JSON.stringify(keys) !== JSON.stringify(expected) || statement.schema !== "agentics.replay-capability/v1" || !statement.replayId ||
+      !statement.tenantId || !statement.repositoryId || !Array.isArray(statement.eventTypes) || !statement.eventTypes.length ||
+      statement.eventTypes.some((type) => typeof type !== "string" || !type) || !["REPLAY","REDRIVE"].includes(statement.purpose) ||
+      !Number.isFinite(Date.parse(statement.expiresAt)) || (statement.eventId !== null && typeof statement.eventId !== "string") ||
+      (statement.sourceTopic !== null && typeof statement.sourceTopic !== "string") || (statement.payloadSha256 !== null && !/^[a-f0-9]{64}$/.test(statement.payloadSha256)) ||
+      (statement.orderingKey !== null && typeof statement.orderingKey !== "string") || (statement.subscription !== null && typeof statement.subscription !== "string")) throw new TypeError("INVALID_REPLAY_CAPABILITY");
+    const key = this.#keys.get(statement.issuer); if (!key || canonicalJson(statement) !== new TextDecoder().decode(statementBytes) || !verify(null, statementBytes, key, signature))
+      throw new TypeError("UNTRUSTED_REPLAY_CAPABILITY");
+    return deepFreeze({ [replayCapabilityBrand]: true, statement }) as VerifiedReplayCapability;
+  }
+}
+export function assertVerifiedReplayCapability(value: unknown): asserts value is VerifiedReplayCapability {
+  if (!value || typeof value !== "object" || (value as Partial<VerifiedReplayCapability>)[replayCapabilityBrand] !== true) throw new TypeError("VERIFIED_REPLAY_CAPABILITY_REQUIRED");
+}
+
+export function replayEffectPolicy(mode: "DRY_RUN" | "LIVE", envelope: EvolutionEnvelope, capability?: VerifiedReplayCapability,
+  nowMs = Date.now()): ReplayEffectPolicy {
+  if (mode === "DRY_RUN") return deepFreeze({ replay: true, replayId: "dry-run", allowExternalEffects: false, allowNormalTopicPublish: false,
+    tenantId: envelope.tenantId, repositoryId: envelope.repositoryId });
+  assertVerifiedReplayCapability(capability);
+  const scope = capability.statement;
+  if (scope.purpose !== "REPLAY") throw new TypeError("REPLAY_CAPABILITY_REQUIRED");
+  if (scope.tenantId !== envelope.tenantId || scope.repositoryId !== envelope.repositoryId || !scope.eventTypes.includes(envelope.type)) throw new TypeError("REPLAY_SCOPE_MISMATCH");
+  if (Date.parse(scope.expiresAt) <= nowMs) throw new TypeError("REPLAY_CAPABILITY_EXPIRED");
+  return deepFreeze({ replay: true, replayId: scope.replayId, allowExternalEffects: true, allowNormalTopicPublish: false,
+    tenantId: envelope.tenantId, repositoryId: envelope.repositoryId });
+}
+
+export class ReplayTransport {
+  constructor(readonly transport: EventTransport & Partial<Pick<PostgresLocalTransport, "pull">>, readonly topic = "evolution.replay.v1") {}
+  async publish(message: TransportMessage, policy: ReplayEffectPolicy): Promise<{ messageId: string }> {
+    if (!policy.replay || policy.tenantId !== message.envelope.tenantId || policy.repositoryId !== message.envelope.repositoryId) throw new TypeError("REPLAY_POLICY_SCOPE_MISMATCH");
+    const replayMessage = { ...message, attributes: { ...message.attributes, replay: "true", replayId: policy.replayId,
+      effectMode: policy.allowExternalEffects ? "LIVE_SCOPED" : "DRY_RUN" } };
+    return this.transport.publish(this.topic, replayMessage);
+  }
+  pull(tenantId: string, limit = 10) { if (!this.transport.pull) throw new TypeError("REPLAY_SUBSCRIPTION_REQUIRED"); return this.transport.pull(tenantId, this.topic, limit); }
+}
+
+export class ReplayEffectExecutor {
+  async execute<T>(policy: ReplayEffectPolicy, dryRun: () => Promise<T>, live?: () => Promise<T>): Promise<T> {
+    if (!policy.replay || policy.allowNormalTopicPublish !== false) throw new TypeError("INVALID_REPLAY_EFFECT_POLICY");
+    if (!policy.allowExternalEffects) return dryRun();
+    if (!live) throw new TypeError("LIVE_REPLAY_EFFECT_HANDLER_REQUIRED"); return live();
+  }
+}

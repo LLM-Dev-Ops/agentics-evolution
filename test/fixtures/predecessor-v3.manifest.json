@@ -1,0 +1,10 @@
+{
+  "schema": "agentics.predecessor-contract/v1",
+  "release": "prompt-03-schema-v3",
+  "runtime": "node20",
+  "entrypoint": "predecessor-v3-app.mjs",
+  "entrypointSha256": "a6055feb88e1ffb3123acd73ffbad60ccbb024a5704159267e9400a5c6dd62f5",
+  "supportedSchemaMinimum": 1,
+  "supportedSchemaMaximum": 9,
+  "operations": ["writeAggregateV3", "readAggregateV3"]
+}

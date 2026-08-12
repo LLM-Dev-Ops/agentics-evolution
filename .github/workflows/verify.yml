@@ -69,3 +69,43 @@ jobs:
       - run: npm run lint && npm run typecheck && npm run build
       - name: Verify arm64 native capability selection
         run: NODE_PATH=.agentics-platform/node_modules node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"
+  prompt-03-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      PUBSUB_EMULATOR_HOST: 127.0.0.1:8085
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --omit=optional --ignore-scripts
+      - name: Start pinned Pub/Sub emulator
+        run: |
+          docker run --detach --name agentics-pubsub --publish 8085:8085 \
+            gcr.io/google.com/cloudsdktool/google-cloud-cli@sha256:7e14c31d914572f23f4390f39cb816f889850daca71a3d00355b6bd2a749de15 \
+            gcloud beta emulators pubsub start --host-port=0.0.0.0:8085 --project=agentics-test
+          for attempt in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/8085) >/dev/null 2>&1 && exit 0; sleep 1; done
+          docker logs agentics-pubsub
+          exit 1
+      - run: npm run verify:prompt-03
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: prompt-03-postgres-${{ github.sha }}
+          path: |
+            reports/prompt-03-postgres.json
+            reports/prompt-03-benchmark.json
+          if-no-files-found: error
