@@ -18,7 +18,6 @@ const trustRegistry = new EnvelopeSchemaRegistry();
 for (const type of [...events, "AuthorizationRevoked"]) trustRegistry.register(type, 1, { allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId", "repositoryId"] });
 const evidenceStore = new Map();
 const resolveEvidence = (reference) => evidenceStore.get(reference.uri) ?? new Uint8Array();
-const verifyAuthority = authorityVerifier.verify;
 function envelope(type, index, overrides = {}) {
   const authority = authorities[index] ?? "Governance";
   const base = { envelopeSchema: "agentics.evolution-envelope/v1", schemaVersion: 1, id: newEventId(), type, ...identity,
@@ -67,19 +66,19 @@ test("trust transition property exhaustively permits only the four evidenced edg
 
 test("complete vertical event history replays deterministically and authorizes only last", () => {
   const history = events.map((type, index) => envelope(type, index));
-  const first = replayTrust(identity, history, trustRegistry, resolveEvidence, verifyAuthority);
-  const second = replayTrust(identity, history, trustRegistry, resolveEvidence, verifyAuthority);
+  const first = replayTrust(identity, history, trustRegistry, resolveEvidence, authorityVerifier);
+  const second = replayTrust(identity, history, trustRegistry, resolveEvidence, authorityVerifier);
   assert.equal(first.state, "AUTHORIZED"); assert.equal(first.version, 4); assert.deepEqual(first, second);
   assert.equal(authorizeServing(first).aggregateId, identity.aggregateId);
-  assert.equal(replayTrust(identity, history.slice(0, 3), trustRegistry, resolveEvidence, verifyAuthority).state, "PROVED");
-  assert.throws(() => replayTrust(identity, [history[0], history[2]], trustRegistry, resolveEvidence, verifyAuthority), /illegal/);
-  assert.throws(() => replayTrust(identity, [envelope("HypothesisProposed", 0, { tenantId: tenantId("tenant-b"), payload: { tenantId: "tenant-b", repositoryId: "repo-a" } })], trustRegistry, resolveEvidence, verifyAuthority), /foreign/);
-  assert.throws(() => replayTrust(identity, history, trustRegistry, () => new TextEncoder().encode("tampered"), verifyAuthority), /verification failed/);
-  assert.throws(() => replayTrust(identity, history, trustRegistry, resolveEvidence, () => false), /signed authority evidence rejected/);
-  const duplicate = replayTrust(identity, [history[0], history[0]], trustRegistry, resolveEvidence, verifyAuthority); assert.equal(duplicate.version, 1);
+  assert.equal(replayTrust(identity, history.slice(0, 3), trustRegistry, resolveEvidence, authorityVerifier).state, "PROVED");
+  assert.throws(() => replayTrust(identity, [history[0], history[2]], trustRegistry, resolveEvidence, authorityVerifier), /illegal/);
+  assert.throws(() => replayTrust(identity, [envelope("HypothesisProposed", 0, { tenantId: tenantId("tenant-b"), payload: { tenantId: "tenant-b", repositoryId: "repo-a" } })], trustRegistry, resolveEvidence, authorityVerifier), /foreign/);
+  assert.throws(() => replayTrust(identity, history, trustRegistry, () => new TextEncoder().encode("tampered"), authorityVerifier), /verification failed/);
+  assert.throws(() => replayTrust(identity, history, trustRegistry, resolveEvidence, Object.create(null)), /configured Ed25519/);
+  const duplicate = replayTrust(identity, [history[0], history[0]], trustRegistry, resolveEvidence, authorityVerifier); assert.equal(duplicate.version, 1);
   const conflicting = envelope("HypothesisProposed", 0, { idempotencyKey: history[0].idempotencyKey, payload: { ...history[0].payload, step: 99 } });
-  assert.throws(() => replayTrust(identity, [history[0], conflicting], trustRegistry, resolveEvidence, verifyAuthority), /conflicting/);
-  const revoked = replayTrust(identity, [...history, envelope("AuthorizationRevoked", 4)], trustRegistry, resolveEvidence, verifyAuthority);
+  assert.throws(() => replayTrust(identity, [history[0], conflicting], trustRegistry, resolveEvidence, authorityVerifier), /conflicting/);
+  const revoked = replayTrust(identity, [...history, envelope("AuthorizationRevoked", 4)], trustRegistry, resolveEvidence, authorityVerifier);
   assert.throws(() => authorizeServing(revoked), /active AUTHORIZED/);
 });
 
@@ -103,9 +102,9 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
 test("same idempotency key remains tenant scoped", () => {
   const key = idempotencyKey(newIdempotencyKey());
   const first = envelope("HypothesisProposed", 0, { idempotencyKey: key });
-  assert.equal(replayTrust(identity, [first, first], trustRegistry, resolveEvidence, verifyAuthority).version, 1);
+  assert.equal(replayTrust(identity, [first, first], trustRegistry, resolveEvidence, authorityVerifier).version, 1);
   const other = { tenantId: tenantId("tenant-b"), repositoryId: repositoryId("repo-a"), aggregateId: aggregateId("aggregate-a") };
   const second = envelope("HypothesisProposed", 0, { ...other, idempotencyKey: key, correlationId: correlationId(newCorrelationId()),
     payload: { tenantId: other.tenantId, repositoryId: other.repositoryId } });
-  assert.equal(replayTrust(other, [second], trustRegistry, resolveEvidence, verifyAuthority).version, 1);
+  assert.equal(replayTrust(other, [second], trustRegistry, resolveEvidence, authorityVerifier).version, 1);
 });

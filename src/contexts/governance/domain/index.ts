@@ -4,3 +4,4 @@ export interface PromotionAuthorizationBoundary extends AggregateScope {
   readonly aggregateKind: "PromotionAuthorization";
 }
 export * from "./trust-aggregate.js";
+export * from "./authority-evidence.js";

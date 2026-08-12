@@ -4,6 +4,7 @@ import { EvolutionEnvelope, envelopeDigest } from "../../../shared-kernel/evolut
 import { ServingAuthorization, TrustCommand, TrustState, TransitionEvidence, transitionTrust } from "../../../shared-kernel/trust-state.js";
 import { canonicalJson } from "../../../shared-kernel/immutable.js";
 import { EnvelopeSchemaRegistry } from "../../../shared-kernel/schema-registry.js";
+import { Ed25519AuthorityEvidenceVerifier } from "./authority-evidence.js";
 
 export interface TrustAggregate extends AggregateIdentity {
   readonly state: TrustState | null;
@@ -16,14 +17,9 @@ export interface TrustAggregate extends AggregateIdentity {
 export const emptyTrustAggregate = (identity: AggregateIdentity): TrustAggregate => Object.freeze({ ...identity, state: null, version: 0, historyDigest: null, handledKeys: Object.freeze({}), revoked: false });
 
 export type DigestResolver = (reference: DigestReference) => Uint8Array;
-export type TransitionEvidenceVerifier = (input: Readonly<{
-  authority: "Dream" | "Darwin" | "Flywheel" | "Governance";
-  event: EvolutionEnvelope;
-  reference: DigestReference;
-  bytes: Uint8Array;
-}>) => boolean;
 export function applyTrustEvent(state: TrustAggregate, event: EvolutionEnvelope, registry: EnvelopeSchemaRegistry,
-  resolveEvidence: DigestResolver, verifyAuthority: TransitionEvidenceVerifier): TrustAggregate {
+  resolveEvidence: DigestResolver, verifier: Ed25519AuthorityEvidenceVerifier): TrustAggregate {
+  if (!(verifier instanceof Ed25519AuthorityEvidenceVerifier)) throw new TypeError("configured Ed25519 authority verifier required");
   registry.validate(event);
   if (!sameScope(state, event) || state.aggregateId !== event.aggregateId) throw new TypeError("foreign aggregate event rejected");
   const scopedKey = `${event.tenantId}:${event.idempotencyKey}`;
@@ -46,7 +42,7 @@ export function applyTrustEvent(state: TrustAggregate, event: EvolutionEnvelope,
     for (const reference of event.evidence) {
       const bytes = resolveEvidence(reference);
       verifyDigest(reference, bytes);
-      if (!verifyAuthority({ authority: requiredAuthority, event, reference, bytes })) throw new TypeError(`${requiredAuthority} signed authority evidence rejected`);
+      if (!verifier.verify({ authority: requiredAuthority, event, reference, bytes })) throw new TypeError(`${requiredAuthority} signed authority evidence rejected`);
     }
     const evidence: TransitionEvidence = nextCommand === "ProposeHypothesis" ? { sourceValidated: true }
       : nextCommand === "GenerateCandidate" ? { mutationAdmitted: true }
@@ -66,8 +62,8 @@ export function authorizeServing(aggregate: TrustAggregate): ServingAuthorizatio
 }
 
 export function replayTrust(identity: AggregateIdentity, events: readonly EvolutionEnvelope[], registry: EnvelopeSchemaRegistry,
-  resolveEvidence: DigestResolver, verifyAuthority: TransitionEvidenceVerifier): TrustAggregate {
+  resolveEvidence: DigestResolver, verifier: Ed25519AuthorityEvidenceVerifier): TrustAggregate {
   let state = emptyTrustAggregate(identity);
-  for (const event of events) state = applyTrustEvent(state, event, registry, resolveEvidence, verifyAuthority);
+  for (const event of events) state = applyTrustEvent(state, event, registry, resolveEvidence, verifier);
   return state;
 }

@@ -3,7 +3,6 @@ import { DigestReference } from "../../../shared-kernel/digest.js";
 import { EvolutionEnvelope } from "../../../shared-kernel/evolution-envelope.js";
 import { canonicalJson } from "../../../shared-kernel/immutable.js";
 import { digestBytes, sha256Digest } from "../../../shared-kernel/digest.js";
-import type { TransitionEvidenceVerifier } from "../domain/trust-aggregate.js";
 
 export type TransitionAuthority = "Dream" | "Darwin" | "Flywheel" | "Governance";
 export interface AuthorityEvidenceStatement {
@@ -35,7 +34,7 @@ export class Ed25519AuthorityEvidenceVerifier {
     }));
     if (this.#keys.size !== roots.length) throw new TypeError("duplicate authority key ID");
   }
-  readonly verify: TransitionEvidenceVerifier = ({ authority, event, bytes }: { authority: TransitionAuthority; event: EvolutionEnvelope; reference: DigestReference; bytes: Uint8Array }) => {
+  verify({ authority, event, bytes }: { authority: TransitionAuthority; event: EvolutionEnvelope; reference: DigestReference; bytes: Uint8Array }): boolean {
     let statement: AuthorityEvidenceStatement;
     try { statement = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { return false; }
     const root = this.#keys.get(statement.keyId);
@@ -45,5 +44,5 @@ export class Ed25519AuthorityEvidenceVerifier {
     const unsigned = canonicalJson({ schema: statement.schema, keyId: statement.keyId, authority: statement.authority,
       eventBinding: sha256Digest(statement.eventBinding), verdict: statement.verdict });
     return verify(null, Buffer.from(unsigned), root.key, Buffer.from(statement.signature, "base64"));
-  };
+  }
 }
