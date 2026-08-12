@@ -8,8 +8,10 @@ export interface PolicyDecisionPort { evaluate(scope: GovernanceScope, facts: Re
 export interface EnforcementDecision { readonly allowed: boolean; readonly decisionId: string; readonly reasonCode: string | null; }
 export interface EnforcementPort { enforce(intent: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<EnforcementDecision>; }
 export interface LedgerReservation { readonly reservationId: string; readonly status: "active" | "consumed" | "expired" | "cancelled"; readonly amount: string; readonly expiresAt: string; }
+export interface LedgerBalanceAuthority { readonly authority: "agentics-usage-ledger"; readonly organizationId: string; readonly currentBalance: string; readonly reservedAmount: string; readonly availableBalance: string; readonly observedAt: string; }
+export interface AuthoritativeLedgerReservation extends LedgerReservation { readonly balanceAuthority: LedgerBalanceAuthority; }
 export interface UsageLedgerPort {
-  reserve(input: { organizationId: string; amount: string; ttlSeconds: number; idempotencyKey: string; actor: string; correlationId: string }, signal: AbortSignal): Promise<LedgerReservation>;
+  reserve(input: { organizationId: string; amount: string; ttlSeconds: number; idempotencyKey: string; actor: string; correlationId: string }, signal: AbortSignal): Promise<AuthoritativeLedgerReservation>;
   consume(input: { reservationId: string; actualAmount: string; idempotencyKey: string; actor: string }, signal: AbortSignal): Promise<{ entryId: string; amount: string }>;
   cancel(input: { reservationId: string; actor: string }, signal: AbortSignal): Promise<LedgerReservation>;
 }

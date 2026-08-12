@@ -33,7 +33,7 @@ test("enforcement.rules.behavior enforcement.outage.behavior ledger.consume.beha
   assert.deepEqual(await enforcement.enforce({}, new AbortController().signal), { allowed: false, decisionId: "d", reasonCode: "blocked" });
   await assert.rejects(new EnforcementHttpAdapter(new URL("http://x"), async () => new Response("down", { status: 503 })).enforce({}, new AbortController().signal), /ENFORCEMENT_UNAVAILABLE/);
   const seen = []; const ledger = new UsageLedgerHttpAdapter(new URL("http://ledger.invalid"), async () => "identity-token", async (url, init) => {
-    seen.push([String(url), init.headers.authorization]); return new Response(JSON.stringify({ reservationId: "r1", status: "active", amount: "10", expiresAt: new Date().toISOString() }));
+    seen.push([String(url), init.headers.authorization]); return new Response(JSON.stringify({ reservationId: "r1", status: "active", amount: "10", expiresAt: new Date().toISOString(), balanceAuthority:{authority:"agentics-usage-ledger",organizationId:"org",currentBalance:"100.000000",reservedAmount:"10.000000",availableBalance:"90.000000",observedAt:new Date().toISOString()} }));
   });
   assert.equal((await ledger.reserve({ organizationId: "org", amount: "10", ttlSeconds: 60, idempotencyKey: crypto.randomUUID(), actor: "a", correlationId: "c" }, new AbortController().signal)).reservationId, "r1");
   assert.equal(seen[0][1], "Bearer identity-token");

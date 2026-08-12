@@ -9,6 +9,7 @@ import { DeletionCoordinator, deletionTombstone } from "../dist/contexts/governa
 import { privacySafeLog, tenantMetricLabel, TenantBoundaryIssuer } from "../dist/contexts/governance/application/tenant-boundaries.js";
 import { retentionDays, retentionExpiresAt, tenantSecurityProfile } from "../dist/contexts/governance/domain/privacy.js";
 import { assertNoClassificationDowngrade, authorizeProvider, effectiveClassification } from "../dist/contexts/governance/domain/provider-policy.js";
+import {signedDeletionAuthorization}from"./fixtures/deletion-authorization.mjs";
 
 const now = 1_800_000_000; const issuer = "https://identity.example"; const audience = "agentics-api";
 const pair = generateKeyPairSync("ed25519"); const publicPem = pair.publicKey.export({ type: "spki", format: "pem" });
@@ -65,8 +66,8 @@ test("tombstone deletion requires every boundary and produces a tamper-evident s
   const categories = ["DATABASE", "ARTIFACT", "EVENT", "CACHE", "VECTOR", "KEY", "BACKUP_OBLIGATION"];
   const boundaries = categories.map(category => ({ category, delete: async (value, operationKey) => ({ category,operationKey,tenantId:value.tenantId,repositoryId:value.repositoryId,requestId:value.requestId,removed:value.tenantId === "tenant-a"?1:0,retained:category === "BACKUP_OBLIGATION"?1:0,held:0,digest:"a".repeat(64),acknowledgementDigest:"b".repeat(64) }), verify: async value => value.acknowledgementDigest === "b".repeat(64) }));
   const signing = generateKeyPairSync("ed25519"); const signer = new Ed25519DeletionReceiptSigner("delete-key/1", signing.privateKey.export({ type: "pkcs8", format: "pem" }));
-  const receipt = await new DeletionCoordinator(boundaries, signer, () => new Date("2027-01-15T08:01:00.000Z")).execute(tombstone);
+  const receipt = await new DeletionCoordinator(boundaries, signer, () => new Date("2027-01-15T08:01:00.000Z")).execute(signedDeletionAuthorization(tombstone,signing));
   const verifier = new Ed25519DeletionReceiptVerifier({ "delete-key/1": signing.publicKey.export({ type: "spki", format: "pem" }) }); assert.equal(verifier.verify(receipt), true); assert.equal(receipt.payload.results.length, 7);
   assert.equal(verifier.verify({ ...receipt, payload: { ...receipt.payload, completedAt: "2027-01-15T08:02:00.000Z" } }), false);
-  await assert.rejects(new DeletionCoordinator(boundaries.slice(0, -1), signer).execute(tombstone), /BOUNDARY_MISSING/);
+  await assert.rejects(new DeletionCoordinator(boundaries.slice(0, -1), signer).execute(signedDeletionAuthorization(tombstone,signing)), /BOUNDARY_MISSING/);
 });
