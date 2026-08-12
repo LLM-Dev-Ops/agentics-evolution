@@ -10,9 +10,16 @@
     "typecheck": "tsc --noEmit",
     "lint": "node scripts/check-source.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:evidence": "node scripts/test-evidence.mjs",
     "conformance": "node scripts/conformance.mjs",
+    "evidence:supply-chain": "node scripts/supply-chain.mjs",
     "evidence:sbom": "cyclonedx-npm --output-file reports/sbom.cdx.json --output-format JSON --spec-version 1.6",
-    "verify:prompt-01": "npm run lint && npm run typecheck && npm test && npm run conformance && npm run evidence:sbom"
+    "evidence:provenance": "node scripts/provenance.mjs",
+    "verify:sbom": "node scripts/validate-sbom.mjs",
+    "verify:evidence": "node scripts/verify-evidence.mjs",
+    "verify:reproducibility": "node scripts/reproducibility.mjs",
+    "benchmark:foundation": "node scripts/benchmark-foundation.mjs",
+    "verify:prompt-01": "npm run lint && npm run typecheck && npm run test:evidence && npm run conformance && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance && npm run verify:evidence && npm run verify:reproducibility && npm run benchmark:foundation"
   },
   "dependencies": {
     "@claude-flow/cli": "3.38.0",

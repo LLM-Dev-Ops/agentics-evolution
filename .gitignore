@@ -2,6 +2,7 @@ node_modules/
 dist/
 reports/*.json
 !reports/.gitkeep
+reports/*.txt
 *.log
 
 # Codex local configuration

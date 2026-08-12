@@ -6,13 +6,22 @@ on:
 jobs:
   prompt-01:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20.19.5, cache: npm }
       - run: npm install --global npm@10.9.4
-      - run: npm ci --ignore-scripts
+      - name: Verify pinned toolchain
+        run: test "$(node --version)" = "v20.19.5" && test "$(npm --version)" = "10.9.4"
+      - name: Clean production install with optional dependencies isolated
+        run: npm ci --ignore-scripts --omit=optional
       - run: npm run verify:prompt-01
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: prompt-01-evidence, path: reports/ }
+        with:
+          name: prompt-01-evidence-${{ github.sha }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 30
