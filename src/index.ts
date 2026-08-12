@@ -5,6 +5,7 @@ export * from "./shared-kernel/index.js";
 export * from "./trust/index.js";
 export * from "./persistence/postgres.js";
 export * from "./persistence/outbox-relay.js";
+export * from "./persistence/critical-resources.js";
 export * from "./messaging/transport.js";
 export * from "./messaging/pubsub-transport.js";
 export * from "./messaging/postgres-local-transport.js";

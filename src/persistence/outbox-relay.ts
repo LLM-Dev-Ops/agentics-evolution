@@ -1,21 +1,24 @@
 import type pg from "pg";
+import { randomUUID } from "node:crypto";
 import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
 import type { EventTransport, TransportMessage } from "../messaging/transport.js";
 import { PostgresPersistence } from "./postgres.js";
 
-export interface OutboxLease { readonly tenantId: string; readonly eventId: string; readonly topic: string; readonly orderingKey: string; readonly envelope: EvolutionEnvelope; readonly traceparent?: string; readonly attempts: number; }
+export interface OutboxLease { readonly tenantId: string; readonly eventId: string; readonly topic: string; readonly orderingKey: string; readonly envelope: EvolutionEnvelope; readonly traceparent?: string; readonly attempts: number; readonly leaseToken: string; }
 
 export class OutboxRelay {
   constructor(readonly database: PostgresPersistence, readonly transport: EventTransport, readonly maxAttempts = 8) {}
   async claim(tenantId: string, limit = 50): Promise<readonly OutboxLease[]> {
     return this.database.tenantTransaction(tenantId, "READ COMMITTED", async (client) => {
+      const token = randomUUID();
       const rows = await client.query(`SELECT tenant_id,event_id,topic,ordering_key,envelope,traceparent,attempts
         FROM outbox WHERE tenant_id=$1 AND published_at IS NULL AND next_attempt_at<=transaction_timestamp() AND expires_at>transaction_timestamp()
+        AND (lease_expires_at IS NULL OR lease_expires_at<=transaction_timestamp())
         ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT $2`, [tenantId, limit]);
-      await client.query(`UPDATE outbox SET attempts=attempts+1,next_attempt_at=transaction_timestamp()+interval '30 seconds'
-        WHERE tenant_id=$1 AND event_id=ANY($2::uuid[])`, [tenantId, rows.rows.map((row) => row.event_id)]);
+      await client.query(`UPDATE outbox SET attempts=attempts+1,lease_token=$3,lease_owner='relay',lease_expires_at=transaction_timestamp()+interval '30 seconds'
+        WHERE tenant_id=$1 AND event_id=ANY($2::uuid[])`, [tenantId, rows.rows.map((row) => row.event_id), token]);
       return rows.rows.map((row) => ({ tenantId: row.tenant_id, eventId: row.event_id, topic: row.topic, orderingKey: row.ordering_key,
-        envelope: row.envelope, traceparent: row.traceparent ?? undefined, attempts: row.attempts + 1 }));
+        envelope: row.envelope, traceparent: row.traceparent ?? undefined, attempts: row.attempts + 1, leaseToken: token }));
     });
   }
   async publish(lease: OutboxLease): Promise<void> {
@@ -25,8 +28,8 @@ export class OutboxRelay {
     try {
       const receipt = await this.transport.publish(lease.topic, message);
       await this.database.tenantTransaction(lease.tenantId, "READ COMMITTED", (client) => client.query(
-        "UPDATE outbox SET published_at=transaction_timestamp(),broker_message_id=$3 WHERE tenant_id=$1 AND event_id=$2 AND published_at IS NULL",
-        [lease.tenantId, lease.eventId, receipt.messageId]).then(() => undefined));
+        "UPDATE outbox SET published_at=transaction_timestamp(),broker_message_id=$3,lease_token=NULL,lease_expires_at=NULL WHERE tenant_id=$1 AND event_id=$2 AND published_at IS NULL AND lease_token=$4",
+        [lease.tenantId, lease.eventId, receipt.messageId, lease.leaseToken]).then((result) => { if (result.rowCount !== 1) throw new Error("STALE_OUTBOX_LEASE"); }));
     } catch (error) {
       if (lease.attempts >= this.maxAttempts) await this.deadLetter(lease, error);
       throw error;

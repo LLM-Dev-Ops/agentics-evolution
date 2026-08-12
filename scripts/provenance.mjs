@@ -22,6 +22,8 @@ for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-b
   if (prompt02 && !exists) throw new Error(`Prompt 02 provenance requires ${path}`);
   if (exists && prompt02) subjects.push({ path, sha256: sha256(await readFile(path)) });
 }
+if (process.env.AGENTICS_BUILD_PROMPT === "03") for (const path of ["reports/prompt-03-postgres.json", "reports/prompt-03-benchmark.json"])
+  subjects.push({ path, sha256: sha256(await readFile(path)) });
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
 if (dirty) throw new Error("refusing provenance generation from a dirty tracked worktree");

@@ -69,3 +69,33 @@ jobs:
       - run: npm run lint && npm run typecheck && npm run build
       - name: Verify arm64 native capability selection
         run: NODE_PATH=.agentics-platform/node_modules node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"
+  prompt-03-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --omit=optional --ignore-scripts
+      - run: npm run migrate && npm run verify:postgres
+      - run: npm run build && node --test test/postgres-integration.test.mjs test/persistence-concurrency.test.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: prompt-03-postgres-${{ github.sha }}
+          path: reports/prompt-03-postgres.json
+          if-no-files-found: error

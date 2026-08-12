@@ -9,8 +9,31 @@ export class PostgresLocalTransport implements EventTransport {
     validateTransportMessage(message);
     const messageId = newEventId();
     await this.database.tenantTransaction(message.envelope.tenantId, "READ COMMITTED", (client) => client.query(
-      `INSERT INTO inbox(tenant_id,consumer,event_id,payload_digest) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
-      [message.envelope.tenantId, `local:${topic}`, message.envelope.id, message.envelope.evidence[0]?.sha256 ?? "0".repeat(64)]).then(() => undefined));
+      `INSERT INTO local_transport_messages(tenant_id,message_id,event_id,topic,ordering_key,envelope,attributes)
+       VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,event_id,topic) DO NOTHING`,
+      [message.envelope.tenantId, messageId, message.envelope.id, topic, message.orderingKey, message.envelope, message.attributes]).then(() => undefined));
     return { messageId };
+  }
+  async pull(tenantId: string, topic: string, limit = 10): Promise<readonly { messageId: string; message: TransportMessage; leaseToken: string }[]> {
+    return this.database.tenantTransaction(tenantId, "READ COMMITTED", async (client) => {
+      const leaseToken = newEventId();
+      const rows = await client.query(`SELECT message_id,envelope,ordering_key,attributes FROM local_transport_messages
+        WHERE tenant_id=$1 AND topic=$2 AND acked_at IS NULL AND available_at<=transaction_timestamp()
+        AND (lease_expires_at IS NULL OR lease_expires_at<=transaction_timestamp())
+        ORDER BY ordering_key,created_at FOR UPDATE SKIP LOCKED LIMIT $3`, [tenantId, topic, limit]);
+      await client.query(`UPDATE local_transport_messages SET delivery_count=delivery_count+1,lease_token=$3,lease_expires_at=transaction_timestamp()+interval '10 seconds'
+        WHERE tenant_id=$1 AND message_id=ANY($2::uuid[])`, [tenantId, rows.rows.map((row) => row.message_id), leaseToken]);
+      return rows.rows.map((row) => ({ messageId: row.message_id, leaseToken, message: { envelope: row.envelope, orderingKey: row.ordering_key, attributes: row.attributes } }));
+    });
+  }
+  async ack(tenantId: string, messageId: string, leaseToken: string): Promise<void> {
+    await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query(
+      "UPDATE local_transport_messages SET acked_at=transaction_timestamp() WHERE tenant_id=$1 AND message_id=$2 AND lease_token=$3 AND acked_at IS NULL",
+      [tenantId, messageId, leaseToken]).then((result) => { if (result.rowCount !== 1) throw new Error("STALE_TRANSPORT_LEASE"); }));
+  }
+  async nack(tenantId: string, messageId: string, leaseToken: string): Promise<void> {
+    await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query(
+      "UPDATE local_transport_messages SET lease_token=NULL,lease_expires_at=NULL,available_at=transaction_timestamp() WHERE tenant_id=$1 AND message_id=$2 AND lease_token=$3 AND acked_at IS NULL",
+      [tenantId, messageId, leaseToken]).then(() => undefined));
   }
 }
