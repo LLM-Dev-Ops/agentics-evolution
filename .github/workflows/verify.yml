@@ -31,6 +31,8 @@ jobs:
             echo 'PUBLIC_EOF'
           } >> "$GITHUB_ENV"
       - run: npm run verify:prompt-01 && npm run verify:prompt-02
+        env:
+          AGENTICS_UPSTREAM_TOKEN: ${{ secrets.AGENTICS_UPSTREAM_TOKEN }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -154,3 +156,37 @@ jobs:
             reports/prompt-04-benchmark.json
             reports/prompt-04-conformance.json
           if-no-files-found: error
+  prompt-05-governance:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres@sha256:38471f330eb885e04de130b768d6db4e10469e2311879c7e5c699f6d2d8a1c74
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+      TEST_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --omit=optional --ignore-scripts
+      - run: npm run install:platform-artifacts
+      - name: Create independently anchored Prompt 05 evidence identity
+        run: |
+          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/evidence-private.pem"
+          openssl pkey -in "$RUNNER_TEMP/evidence-private.pem" -pubout -out "$RUNNER_TEMP/evidence-public.pem"
+          { echo 'AGENTICS_RELEASE_PRIVATE_KEY<<PRIVATE_EOF'; cat "$RUNNER_TEMP/evidence-private.pem"; echo 'PRIVATE_EOF'; echo 'AGENTICS_RELEASE_PUBLIC_KEY<<PUBLIC_EOF'; cat "$RUNNER_TEMP/evidence-public.pem"; echo 'PUBLIC_EOF'; } >> "$GITHUB_ENV"
+      - run: npm run verify:prompt-05
+        env:
+          AGENTICS_UPSTREAM_TOKEN: ${{ secrets.AGENTICS_UPSTREAM_TOKEN }}
+      - run: npm run evidence:provenance:prompt-05 && npm run verify:evidence
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with: { name: "prompt-05-governance-${{ github.sha }}", path: "reports/", if-no-files-found: error }

@@ -19,6 +19,8 @@ export class ArtifactLineageStore {
     if (staged.expected.sha256 !== payload.artifact.sha256 || staged.metadata.tenantId !== payload.tenantId || staged.metadata.repositoryId !== payload.repositoryId)
       throw new TypeError("STAGED_ARTIFACT_SCOPE_MISMATCH");
     await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
+      const tombstone = await client.query("SELECT 1 FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2", [payload.tenantId,payload.repositoryId]);
+      if (tombstone.rowCount) throw new TypeError("REPOSITORY_TOMBSTONED");
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [payload.artifact.sha256]);
       await this.cas.finalize(staged); const grant = this.access.issueRead({ tenantId: payload.tenantId, repositoryId: payload.repositoryId, expiresAt: new Date(Date.now() + 60_000).toISOString() });
       const bytes = await this.cas.read(payload.artifact, grant); if (bytes.byteLength !== payload.size) throw new TypeError("PUBLISHED_ARTIFACT_SIZE_MISMATCH");

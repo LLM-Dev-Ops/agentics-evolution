@@ -5,6 +5,8 @@ const envelope = JSON.parse(await readFile(process.argv[2] ?? "reports/provenanc
 const mode = process.env.AGENTICS_EVIDENCE_MODE ?? "production";
 const trustedKey = requireTrustedPublicKey(process.env.AGENTICS_RELEASE_PUBLIC_KEY, mode, envelope.publicKey);
 const statement = validateSlsaV1(verifyEnvelope(envelope, trustedKey));
+const buildPrompt=statement.predicate.buildDefinition.buildType.match(/prompt-(\d{2})-evidence/)?.[1]??"01";
+if(!statement.predicate.runDetails.metadata.invocationId.endsWith(`:prompt-${buildPrompt}`))throw new Error("provenance invocation does not match build type");
 for (const subject of statement.subject) {
   const actual = sha256(await readFile(subject.name));
   if (actual !== subject.digest?.sha256) throw new Error(`${subject.name}: digest does not match signed provenance`);

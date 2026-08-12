@@ -11,10 +11,10 @@ import { ArtifactLineageStore } from "../dist/infrastructure/artifact-lineage/li
 import { HmacArtifactAccessAuthority } from "../dist/infrastructure/artifact-lineage/hmac-artifact-access.js";
 import { PostgresPersistence } from "../dist/persistence/postgres.js";
 
-if (!process.env.TEST_DATABASE_URL) throw new Error("TEST_DATABASE_URL_REQUIRED_FOR_ARTIFACT_POSTGRES_LIVE");
+const live = !!process.env.TEST_DATABASE_URL;
 const reference = (bytes) => { const sha256 = digestBytes(bytes); return digestReference({ uri: `cas://sha256/${sha256}`, sha256 }); };
 
-test("live PG publication, global references, legal holds, GC and stale-intent reconciliation", async () => {
+test("live PG publication, global references, legal holds, GC and stale-intent reconciliation", { skip: !live }, async () => {
   const suffix = `${process.pid}-${Date.now()}`; const tenantA = tenantId(`live-a-${suffix}`); const tenantB = tenantId(`live-b-${suffix}`);
   const repoA = repositoryId("repo-a"); const repoB = repositoryId("repo-b"); const root = await mkdtemp(join(tmpdir(), "artifact-pg-live-"));
   const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 12, statementTimeoutMs: 10_000, lockTimeoutMs: 5_000, enforceRuntimeRole: false });

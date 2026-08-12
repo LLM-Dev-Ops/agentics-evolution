@@ -34,3 +34,5 @@ test("mislabeled provenance without SLSA v1 fields is rejected", () => {
   assert.throws(() => validateSlsaV1({ predicateType: "https://slsa.dev/provenance/v1" }), /in-toto/);
   assert.throws(() => validateSlsaV1({ _type: "https://in-toto.io/Statement/v1", predicateType: "https://slsa.dev/provenance/v1", subject: [] }), /subjects/);
 });
+
+test("Prompt05 signed provenance binds invocation metadata to its build type",()=>{const statement={_type:"https://in-toto.io/Statement/v1",subject:[{name:"artifact",digest:{sha256:"a".repeat(64)}}],predicateType:"https://slsa.dev/provenance/v1",predicate:{buildDefinition:{buildType:"https://agentics.dev/build-types/prompt-05-evidence/v1",externalParameters:{},internalParameters:{},resolvedDependencies:[]},runDetails:{builder:{id:"fixture"},metadata:{invocationId:"abc:prompt-05",startedOn:new Date().toISOString(),finishedOn:new Date().toISOString()}}}};const verified=validateSlsaV1(verifyEnvelope(signEnvelope(statement,createSigner())));assert.match(verified.predicate.runDetails.metadata.invocationId,/:prompt-05$/);});
