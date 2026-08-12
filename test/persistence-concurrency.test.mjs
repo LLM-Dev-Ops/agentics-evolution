@@ -23,6 +23,7 @@ function messageEnvelope(seed, tenant = "tenant-a", aggregate = "transport-a", k
     policyEpoch: 1, sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
     evidence: [digestReference({ uri: `cas://sha256/${digest}`, sha256: digest })], payload: { tenantId: tenant, repositoryId: "repo-a" } });
 }
+const criticalAudit = (seed, resourceId) => ({ event: messageEnvelope(seed, "tenant-a", resourceId, 1_000 + seed), topic: "evolution.events.v1" });
 
 test("command idempotency returns the original outcome and rejects digest conflicts", { skip: !url }, async () => {
   const suffix = `${process.pid}${Date.now()}`.slice(-10); const tenant = `idempotency-${suffix}`;
@@ -42,14 +43,17 @@ test("command idempotency returns the original outcome and rejects digest confli
 });
 
 test("100 serializable contenders cannot overspend alpha or budget", { skip: !url }, async () => {
-  const admin = new Client({ connectionString: url }); await admin.connect(); await admin.query("DELETE FROM critical_resources WHERE tenant_id='tenant-a' AND resource_id IN ('alpha-c','budget-c')"); await admin.end();
   const database = new PostgresPersistence(configuration); const store = new CriticalResourceStore(database);
   try {
     for (const resourceType of ["alpha", "budget"]) {
-      const resourceId = `${resourceType}-c`; await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType, resourceId }, 1n);
-      const outcomes = await Promise.allSettled(Array.from({ length: 100 }, () => store.spend({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType, resourceId, expectedVersion: 0 }, 1n)));
+      const resourceId = `${resourceType}-${process.pid}-${Date.now()}`; await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType, resourceId }, 1n);
+      const offset = resourceType === "alpha" ? 100 : 200;
+      const outcomes = await Promise.allSettled(Array.from({ length: 100 }, (_, index) => store.spend(
+        { tenantId: "tenant-a", repositoryId: "repo-a", resourceType, resourceId, expectedVersion: 0 }, 1n, criticalAudit(offset + index, resourceId))));
       assert.equal(outcomes.filter((item) => item.status === "fulfilled").length, 1);
       assert.equal(outcomes.find((item) => item.status === "fulfilled").value.remaining, 0n);
+      const persisted = await database.pool.query("SELECT (SELECT count(*)::int FROM domain_events WHERE tenant_id='tenant-a' AND aggregate_id=$1) events,(SELECT count(*)::int FROM outbox WHERE tenant_id='tenant-a' AND aggregate_id=$1) outbox", [resourceId]);
+      assert.deepEqual(persisted.rows[0], { events: 1, outbox: 1 });
     }
   } finally { await database.close(); }
 });
@@ -97,15 +101,21 @@ test("replay is dry-run by default and live effects require signed scoped capabi
 });
 
 test("authorization consumption and champion CAS have one winner", { skip: !url }, async () => {
-  const admin = new Client({ connectionString: url }); await admin.connect(); await admin.query("DELETE FROM critical_resources WHERE tenant_id='tenant-a' AND resource_id IN ('auth-c','champ-c')"); await admin.end();
   const database = new PostgresPersistence(configuration); const store = new CriticalResourceStore(database);
   try {
-    await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "authorization", resourceId: "auth-c" }, null);
-    const auth = await Promise.allSettled(Array.from({ length: 100 }, () => store.consumeAuthorization({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "authorization", resourceId: "auth-c", expectedVersion: 0 })));
+    const suffix = `${process.pid}-${Date.now()}`; const authId = `auth-${suffix}`; const championId = `champ-${suffix}`;
+    await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "authorization", resourceId: authId }, null);
+    const auth = await Promise.allSettled(Array.from({ length: 100 }, (_, index) => store.consumeAuthorization(
+      { tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "authorization", resourceId: authId, expectedVersion: 0 }, criticalAudit(300 + index, authId))));
     assert.equal(auth.filter((item) => item.status === "fulfilled").length, 1);
-    await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "champion", resourceId: "champ-c" }, null);
-    const champion = await Promise.allSettled(Array.from({ length: 100 }, (_, candidate) => store.changeChampion({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "champion", resourceId: "champ-c", expectedVersion: 0 }, { candidate })));
+    await store.initialize({ tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "champion", resourceId: championId }, null);
+    const champion = await Promise.allSettled(Array.from({ length: 100 }, (_, candidate) => store.changeChampion(
+      { tenantId: "tenant-a", repositoryId: "repo-a", resourceType: "champion", resourceId: championId, expectedVersion: 0 }, { candidate }, criticalAudit(400 + candidate, championId))));
     assert.equal(champion.filter((item) => item.status === "fulfilled").length, 1);
+    for (const resourceId of [authId, championId]) {
+      const persisted = await database.pool.query("SELECT (SELECT count(*)::int FROM domain_events WHERE tenant_id='tenant-a' AND aggregate_id=$1) events,(SELECT count(*)::int FROM outbox WHERE tenant_id='tenant-a' AND aggregate_id=$1) outbox", [resourceId]);
+      assert.deepEqual(persisted.rows[0], { events: 1, outbox: 1 });
+    }
   } finally { await database.close(); }
 });
 
