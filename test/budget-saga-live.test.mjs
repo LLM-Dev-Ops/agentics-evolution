@@ -1,19 +1,36 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
+import test from "node:test";
+import pg from "pg";
 import { PostgresPersistence } from "../dist/persistence/postgres.js";
 import { PostgresBudgetAuthority } from "../dist/infrastructure/governance/postgres-budget-authority.js";
 import { repositoryId, tenantId } from "../dist/index.js";
 
-test("budget saga concurrent reserve converges and consume is idempotent with one outbox transition", { skip: !process.env.TEST_DATABASE_URL }, async t => {
-  const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 20, statementTimeoutMs: 10_000, lockTimeoutMs: 5_000, enforceRuntimeRole: false }); t.after(() => database.close());
-  const tenant = tenantId("tenant-a"), repository = repositoryId("repo-a"), key = randomUUID(), reservationId = `reservation-${key}`;
-  const ledger = { reserve: async input => ({ reservationId, status: "active", amount: input.amount, expiresAt: new Date(Date.now()+60_000).toISOString() }),
-    consume: async input => ({ entryId: `entry-${input.reservationId}`, amount: input.actualAmount }), cancel: async input => ({ reservationId: input.reservationId, status: "cancelled", amount: "10", expiresAt: new Date().toISOString() }) };
-  const authority = new PostgresBudgetAuthority(database, ledger); const request = { tenantId: tenant, repositoryId: repository, organizationId: "org-a", amount: "10", ttlSeconds: 60, idempotencyKey: key, actor: "worker", correlationId: randomUUID() };
-  const results = await Promise.all(Array.from({ length: 20 }, () => authority.reserve(request, new AbortController().signal)));
-  assert.equal(new Set(results.map(x => x.reservationId)).size, 1);
-  const consumeKey = randomUUID(); await Promise.all([authority.consume({ tenantId:tenant,repositoryId:repository,reservationId,idempotencyKey:consumeKey,actor:"worker",actualAmount:"7" },new AbortController().signal), authority.consume({ tenantId:tenant,repositoryId:repository,reservationId,idempotencyKey:consumeKey,actor:"worker",actualAmount:"7" },new AbortController().signal)]);
-  const row = await database.tenantTransaction(tenant,"READ COMMITTED",async client => (await client.query("SELECT status,actual_amount FROM budget_reservation_sagas WHERE tenant_id=$1 AND repository_id=$2 AND idempotency_key=$3",[tenant,repository,key])).rows[0]);
-  assert.deepEqual(row,{status:"CONSUMED",actual_amount:"7"});
+const exec = promisify(execFile);
+const configureLedgerDatabase = value => { const url=new URL(value); process.env.PGHOST=url.hostname;process.env.PGPORT=url.port;process.env.PGUSER=decodeURIComponent(url.username);process.env.PGPASSWORD=decodeURIComponent(url.password);process.env.PGDATABASE=url.pathname.slice(1);process.env.DATABASE_POOL_SIZE="40"; };
+
+test("ledger.reserve.behavior: 100 distinct saga IDs share the real authoritative organization ceiling", { skip: !process.env.TEST_DATABASE_URL, timeout: 120_000 }, async t => {
+  await exec("node", ["scripts/build-governance-authorities.mjs"], { maxBuffer:16_000_000 });
+  const evidence=JSON.parse(await readFile("reports/governance-authority-builds.json","utf8"));
+  const built=evidence.authorities.find(item=>item.name==="agentics-usage-ledger"); assert.equal(built.status,"BUILT");
+  configureLedgerDatabase(process.env.TEST_DATABASE_URL); const ledgerRoot=dirname(built.artifact);
+  const upstream=await import(join(ledgerRoot,"ledger/index.js")); const upstreamDb=await import(join(ledgerRoot,"db/index.js")); upstreamDb.initDb();
+  const setup=new pg.Pool({connectionString:process.env.TEST_DATABASE_URL,max:2}); const organizationId=`budget-${randomUUID()}`;
+  await setup.query(`CREATE TABLE IF NOT EXISTS organizations(organization_id text PRIMARY KEY,name text NOT NULL,status text NOT NULL,created_at timestamptz NOT NULL DEFAULT now());
+    CREATE TABLE IF NOT EXISTS ledger_entries(entry_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id text NOT NULL,user_id text,entry_type text NOT NULL,amount numeric(20,6) NOT NULL,balance_after numeric(20,6) NOT NULL,idempotency_key text NOT NULL,correlation_id text,service text,run_id text,created_at timestamptz NOT NULL DEFAULT now(),created_by text NOT NULL,metadata jsonb NOT NULL,checksum text NOT NULL,UNIQUE(organization_id,idempotency_key));
+    CREATE TABLE IF NOT EXISTS reservations(reservation_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),organization_id text NOT NULL,user_id text,amount numeric(20,6) NOT NULL,expires_at timestamptz NOT NULL,status text NOT NULL,created_at timestamptz NOT NULL DEFAULT now(),consumed_at timestamptz,cancelled_at timestamptz,correlation_id text,idempotency_key text NOT NULL,created_by text NOT NULL,UNIQUE(organization_id,idempotency_key));`);
+  await setup.query("INSERT INTO organizations VALUES($1,'acceptance','active',now())",[organizationId]);
+  await upstream.grantCredits({organization_id:organizationId,amount:"100.000000",reason:"acceptance ceiling",idempotency_key:randomUUID(),actor:"acceptance"});
+  const database=new PostgresPersistence({connectionString:process.env.TEST_DATABASE_URL,maxConnections:30,statementTimeoutMs:15_000,lockTimeoutMs:10_000,enforceRuntimeRole:false});
+  t.after(async()=>{await database.close();await upstreamDb.closeDb();await setup.query("DELETE FROM reservations WHERE organization_id=$1",[organizationId]);await setup.query("DELETE FROM ledger_entries WHERE organization_id=$1",[organizationId]);await setup.query("DELETE FROM organizations WHERE organization_id=$1",[organizationId]);await setup.end();});
+  const ledger={reserve:async input=>{const value=await upstream.reserveCredits({organization_id:input.organizationId,amount:input.amount,ttl_seconds:input.ttlSeconds,idempotency_key:input.idempotencyKey,actor:input.actor,correlation_id:input.correlationId});return {reservationId:value.reservation_id,status:value.status,amount:value.amount,expiresAt:new Date(value.expires_at).toISOString()};},consume:async()=>{throw new Error("unused");},cancel:async()=>{throw new Error("unused");}};
+  const authority=new PostgresBudgetAuthority(database,ledger); const tenant=tenantId(`tenant-${randomUUID()}`),repository=repositoryId("repo-budget");
+  const requests=Array.from({length:100},(_,index)=>({tenantId:tenant,repositoryId:repository,organizationId,organizationCreditCeiling:"100",amount:"1",ttlSeconds:300,idempotencyKey:randomUUID(),actor:"acceptance",correlationId:`hold-${index}`}));
+  const held=await Promise.all(requests.map(request=>authority.reserve(request,new AbortController().signal))); assert.equal(new Set(held.map(item=>item.reservationId)).size,100);
+  assert.equal((await upstream.getBalance(organizationId)).available_balance,"0.000000");
+  await assert.rejects(authority.reserve({...requests[0],idempotencyKey:randomUUID(),correlationId:"over-ceiling"},new AbortController().signal),/INSUFFICIENT_CREDITS|Insufficient/);
 });

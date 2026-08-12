@@ -8,6 +8,7 @@ import { canonicalJson } from "../../shared-kernel/immutable.js";
 export class PostgresBudgetAuthority implements BudgetAuthorityPort {
   constructor(private readonly database: PostgresPersistence, private readonly ledger: UsageLedgerPort) {}
   async reserve(input: BudgetReservationRequest, signal: AbortSignal): Promise<LedgerReservation> {
+    if (!/^[1-9][0-9]*(?:\.[0-9]{1,6})?$/.test(input.organizationCreditCeiling) || Number(input.amount) > Number(input.organizationCreditCeiling)) throw new TypeError("BUDGET_ORGANIZATION_CEILING_INVALID");
     const digest = digestBytes(new TextEncoder().encode(canonicalJson(input)));
     const existing = await withSerializableRetry(() => this.database.tenantTransaction(input.tenantId, "SERIALIZABLE", async client => {
       await client.query(`INSERT INTO budget_reservation_sagas(tenant_id,repository_id,idempotency_key,request_digest,organization_id,estimated_amount,status) VALUES($1,$2,$3,$4,$5,$6,'REQUESTED') ON CONFLICT DO NOTHING`, [input.tenantId,input.repositoryId,input.idempotencyKey,digest,input.organizationId,input.amount]);
