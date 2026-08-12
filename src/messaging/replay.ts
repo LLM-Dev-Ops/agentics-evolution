@@ -8,7 +8,8 @@ import type { EventTransport } from "./transport.js";
 const replayCapabilityBrand: unique symbol = Symbol("VerifiedReplayCapability");
 export interface ReplayCapabilityStatement { readonly schema: "agentics.replay-capability/v1"; readonly replayId: string; readonly issuer: string;
   readonly tenantId: string; readonly repositoryId: string; readonly eventTypes: readonly string[]; readonly expiresAt: string;
-  readonly purpose: "REPLAY" | "REDRIVE"; readonly eventId: string | null; readonly sourceTopic: string | null; }
+  readonly purpose: "REPLAY" | "REDRIVE"; readonly eventId: string | null; readonly sourceTopic: string | null;
+  readonly payloadSha256: string | null; readonly orderingKey: string | null; readonly subscription: string | null; }
 export interface VerifiedReplayCapability { readonly [replayCapabilityBrand]: true; readonly statement: ReplayCapabilityStatement; }
 export interface ReplayEffectPolicy { readonly replay: true; readonly replayId: string; readonly allowExternalEffects: boolean;
   readonly allowNormalTopicPublish: false; readonly tenantId: string; readonly repositoryId: string; }
@@ -24,12 +25,13 @@ export class ReplayCapabilityVerifier {
     let value: unknown; try { value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(statementBytes)); } catch { throw new TypeError("INVALID_REPLAY_CAPABILITY"); }
     if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError("INVALID_REPLAY_CAPABILITY");
     const statement = value as ReplayCapabilityStatement;
-    const keys = Object.keys(statement).sort(); const expected = ["eventId","eventTypes","expiresAt","issuer","purpose","replayId","repositoryId","schema","sourceTopic","tenantId"].sort();
+    const keys = Object.keys(statement).sort(); const expected = ["eventId","eventTypes","expiresAt","issuer","orderingKey","payloadSha256","purpose","replayId","repositoryId","schema","sourceTopic","subscription","tenantId"].sort();
     if (JSON.stringify(keys) !== JSON.stringify(expected) || statement.schema !== "agentics.replay-capability/v1" || !statement.replayId ||
       !statement.tenantId || !statement.repositoryId || !Array.isArray(statement.eventTypes) || !statement.eventTypes.length ||
       statement.eventTypes.some((type) => typeof type !== "string" || !type) || !["REPLAY","REDRIVE"].includes(statement.purpose) ||
       !Number.isFinite(Date.parse(statement.expiresAt)) || (statement.eventId !== null && typeof statement.eventId !== "string") ||
-      (statement.sourceTopic !== null && typeof statement.sourceTopic !== "string")) throw new TypeError("INVALID_REPLAY_CAPABILITY");
+      (statement.sourceTopic !== null && typeof statement.sourceTopic !== "string") || (statement.payloadSha256 !== null && !/^[a-f0-9]{64}$/.test(statement.payloadSha256)) ||
+      (statement.orderingKey !== null && typeof statement.orderingKey !== "string") || (statement.subscription !== null && typeof statement.subscription !== "string")) throw new TypeError("INVALID_REPLAY_CAPABILITY");
     const key = this.#keys.get(statement.issuer); if (!key || canonicalJson(statement) !== new TextDecoder().decode(statementBytes) || !verify(null, statementBytes, key, signature))
       throw new TypeError("UNTRUSTED_REPLAY_CAPABILITY");
     return deepFreeze({ [replayCapabilityBrand]: true, statement }) as VerifiedReplayCapability;

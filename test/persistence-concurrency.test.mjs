@@ -117,7 +117,8 @@ test("replay is dry-run by default and live effects require signed scoped capabi
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
   const statement = { schema: "agentics.replay-capability/v1", replayId: "replay-1", issuer: "governance", tenantId: envelope.tenantId,
-    repositoryId: envelope.repositoryId, eventTypes: [envelope.type], expiresAt: "2026-08-13T00:00:00.000Z", purpose: "REPLAY", eventId: null, sourceTopic: null };
+    repositoryId: envelope.repositoryId, eventTypes: [envelope.type], expiresAt: "2026-08-13T00:00:00.000Z", purpose: "REPLAY", eventId: null, sourceTopic: null,
+    payloadSha256: null, orderingKey: null, subscription: null };
   const bytes = new TextEncoder().encode(canonicalJson(statement)); const capability = verifier.verify(bytes, sign(null, bytes, privateKey));
   const live = replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-12T00:00:00.000Z"));
   assert.equal(live.allowExternalEffects, true); assert.equal(live.allowNormalTopicPublish, false); assert.equal(live.replayId, "replay-1");
@@ -210,6 +211,19 @@ test("delayed and reordered delivery cannot violate aggregate version applicatio
   } finally { await database.close(); }
 });
 
+test("ordered consumer applies a real producer event already present in domain history", { skip: !url }, async () => {
+  const tenant = `consumer-real-${process.pid}-${Date.now()}`; const aggregate = `aggregate-${process.pid}-${Date.now()}`; const envelope = messageEnvelope(61, tenant, aggregate, 61);
+  const database = new PostgresPersistence(configuration);
+  try {
+    await database.executeCommand({ aggregateType: "producer", expectedVersion: 0, state: { produced: true }, event: envelope, topic: "evolution.events.v1" });
+    const consumer = new OrderedEnvelopeConsumer(database, "real-consumer"); let effects = 0;
+    const applied = await consumer.apply(envelope, 1, async () => ++effects); assert.equal(applied.kind, "APPLIED"); assert.equal(effects, 1);
+    const duplicate = await consumer.apply(envelope, 1, async () => ++effects); assert.equal(duplicate.kind, "DUPLICATE"); assert.equal(effects, 1);
+    const cursor = await database.pool.query("SELECT aggregate_version,last_event_id FROM consumer_progress WHERE tenant_id=$1 AND consumer='real-consumer' AND aggregate_id=$2", [tenant, aggregate]);
+    assert.deepEqual(cursor.rows[0], { aggregate_version: "1", last_event_id: envelope.id });
+  } finally { await database.close(); }
+});
+
 test("Pub/Sub emulator uses the same validated message contract and redelivers nack", { skip: !process.env.PUBSUB_EMULATOR_HOST }, async () => {
   const projectId = "agentics-test"; const client = new PubSub({ projectId });
   const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const deadLetterTopicName = "evolution.deadletter.v1";
@@ -248,10 +262,13 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
     assert.equal(Buffer.from(poison.payloadBase64, "base64").toString("utf8"), "{malformed");
     const { privateKey, publicKey } = generateKeyPairSync("ed25519"); const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
     const redriveStatement = { schema: "agentics.replay-capability/v1", replayId: `redrive-${poison.messageId}`, issuer: "governance", tenantId: "tenant-a",
-      repositoryId: "repo-a", eventTypes: ["PoisonMessage"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId: poison.messageId, sourceTopic: topicName };
+      repositoryId: "repo-a", eventTypes: ["PoisonMessage"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId: poison.messageId, sourceTopic: topicName,
+      payloadSha256: poison.payloadSha256, orderingKey: poison.orderingKey, subscription: poison.subscription };
     const redriveBytes = new TextEncoder().encode(canonicalJson(redriveStatement)); const redriveCapability = verifier.verify(redriveBytes, sign(null, redriveBytes, privateKey));
     assert.ok(await poisonSink.redrive(poison, topicName, redriveCapability));
     await assert.rejects(poisonSink.redrive({ ...poison, payloadBase64: Buffer.from("tampered").toString("base64") }, topicName, redriveCapability), /POISON_PAYLOAD_DIGEST_MISMATCH/);
+    const recomputed = { ...poison, payloadBase64: Buffer.from("tampered").toString("base64"), payloadSha256: digestBytes(new TextEncoder().encode("tampered")) };
+    await assert.rejects(poisonSink.redrive(recomputed, topicName, redriveCapability), /REDRIVE_CAPABILITY_SCOPE_MISMATCH/);
   } finally {
     await client.subscription(subscriptionName).delete().catch(() => undefined); await client.subscription(poisonSubscription).delete().catch(() => undefined);
     await client.subscription(deadLetterSubscription).delete().catch(() => undefined); await client.subscription(replaySubscription).delete().catch(() => undefined);

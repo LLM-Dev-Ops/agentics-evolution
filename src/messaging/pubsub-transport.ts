@@ -29,7 +29,8 @@ export class GooglePubSubPoisonSink implements PoisonMessageSink {
   async redrive(record: PoisonMessageRecord, sourceTopic: string, capability: VerifiedReplayCapability): Promise<string> {
     assertVerifiedReplayCapability(capability);
     const scope = capability.statement;
-    if (scope.purpose !== "REDRIVE" || scope.eventId !== record.messageId || scope.sourceTopic !== sourceTopic || Date.parse(scope.expiresAt) <= Date.now()) throw new TypeError("REDRIVE_CAPABILITY_SCOPE_MISMATCH");
+    if (scope.purpose !== "REDRIVE" || scope.eventId !== record.messageId || scope.sourceTopic !== sourceTopic || scope.payloadSha256 !== record.payloadSha256 ||
+      scope.orderingKey !== record.orderingKey || scope.subscription !== record.subscription || Date.parse(scope.expiresAt) <= Date.now()) throw new TypeError("REDRIVE_CAPABILITY_SCOPE_MISMATCH");
     const bytes = Buffer.from(record.payloadBase64, "base64"); if (createHash("sha256").update(bytes).digest("hex") !== record.payloadSha256) throw new TypeError("POISON_PAYLOAD_DIGEST_MISMATCH");
     return this.client.topic(sourceTopic, { messageOrdering: true }).publishMessage({ data: bytes, orderingKey: record.orderingKey,
       attributes: { ...record.attributes, redriveId: scope.replayId, redriveCount: "1" } });

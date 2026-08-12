@@ -90,7 +90,8 @@ test("terminal publish failure is attributable and requires authorization to red
       sourceTopic: "evolution.events.v1", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString() } }), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
     const { privateKey, publicKey } = generateKeyPairSync("ed25519"); const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
     const statement = { schema: "agentics.replay-capability/v1", replayId: `redrive-${eventId}`, issuer: "governance", tenantId: tenant,
-      repositoryId: "repo-crash", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId, sourceTopic: "evolution.events.v1" };
+      repositoryId: "repo-crash", eventTypes: ["CrashTested"], expiresAt: new Date(Date.now() + 60_000).toISOString(), purpose: "REDRIVE", eventId, sourceTopic: "evolution.events.v1",
+      payloadSha256: null, orderingKey: null, subscription: null };
     const bytes = new TextEncoder().encode(canonicalJson(statement)); const capability = verifier.verify(bytes, sign(null, bytes, privateKey));
     await failing.redrive(tenant, eventId, capability);
     const successful = new OutboxRelay(database, { publish: async () => ({ messageId: "broker-redrive" }) });
