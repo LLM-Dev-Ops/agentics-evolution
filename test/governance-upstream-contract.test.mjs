@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import {readFile}from"node:fs/promises";
 import test from "node:test";
 import { PolicyEngineHttpAdapter } from "../dist/infrastructure/upstream-policy/policy-engine-client.js";
 import { EnforcementHttpAdapter } from "../dist/infrastructure/upstream-enforcement/enforcement-client.js";
@@ -17,7 +18,8 @@ const pins = [
   ["agentics-usage-ledger", "dbd63a6ae35a45f889170fc2ca3e611907506c45"]
 ];
 test("policy.evaluate.behavior enforcement.schema.behavior ledger.reserve.behavior: source authorities are exact", async () => {
-  for (const [name, commit] of pins) assert.equal((await exec("git", ["-C", `/workspace/agentics-dev/${name}`, "rev-parse", "HEAD"])).stdout.trim(), commit);
+  await exec("node",["scripts/build-governance-authorities.mjs"],{maxBuffer:16_000_000});const report=JSON.parse(await readFile("reports/governance-authority-builds.json","utf8"));
+  for (const [name, commit] of pins){const expected=name==="policy-engine"?"agentics-policy-engine":name;const authority=report.authorities.find(item=>item.name===expected);assert.equal(authority?.commit,commit);assert.match(authority?.sourceTree,/^[a-f0-9]{40}$/);assert.equal(authority?.status,"BUILT");assert.ok(authority?.artifact);}
 });
 
 test("policy.deny.behavior policy.trace.behavior: ACL preserves deny evidence and fails closed on outage", async () => {

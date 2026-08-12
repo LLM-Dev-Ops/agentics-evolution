@@ -17,10 +17,14 @@ test("npm-packed offline verifier installs from cache without repository build p
   // prove a second clean directory installs with registry access disabled.
   const cache = join(temp, "npm-cache"), seed = join(temp, "seed"), install = join(temp, "install");
   await mkdir(seed); await mkdir(install);
-  await writeFile(join(seed, "package.json"), JSON.stringify({ private: true }));
-  await writeFile(join(install, "package.json"), JSON.stringify({ private: true }));
-  await exec("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", cache, tarball], { cwd: seed });
-  await exec("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", cache, tarball], { cwd: install });
+  const isolated={name:"offline-verifier-install-fixture",version:"1.0.0",private:true,workspaces:[]};
+  await writeFile(join(seed, "package.json"), JSON.stringify(isolated));
+  await writeFile(join(install, "package.json"), JSON.stringify(isolated));
+  const npmEnv={...process.env,npm_config_cache:cache,npm_config_workspaces:"false"};
+  await exec("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund", "--workspaces=false", tarball], { cwd:seed,env:npmEnv });
+  const seedLock=JSON.parse(await readFile(join(seed,"package-lock.json"),"utf8"));const resolved=[...new Set(Object.values(seedLock.packages).map(entry=>entry?.resolved).filter(value=>typeof value==="string"&&value.startsWith("https://")))];assert.ok(resolved.length>3);
+  for(const artifact of resolved)await exec("npm",["cache","add",artifact],{cwd:seed,env:npmEnv});
+  await exec("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--workspaces=false", tarball], { cwd:install,env:npmEnv });
   const moduleRoot = join(install, "node_modules", "@agentics-evolution", "offline-verifier");
   assert.doesNotMatch(await readFile(join(moduleRoot, "native-rvf-plugin.mjs"), "utf8"), /\.\.\/\.\.\/dist/);
   const installed = JSON.parse(await readFile(join(moduleRoot, "package.json"), "utf8"));
