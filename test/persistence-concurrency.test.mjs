@@ -134,6 +134,29 @@ test("durable local transport supports at-least-once nack/redelivery and fenced 
   } finally { await database.close(); }
 });
 
+test("delayed and reordered delivery cannot violate aggregate version application", { skip: !url }, async () => {
+  const database = new PostgresPersistence(configuration); const transport = new PostgresLocalTransport(database);
+  const aggregate = `ordered-${process.pid}-${Date.now()}`; const firstEnvelope = messageEnvelope(51, "tenant-a", aggregate, 51); const secondEnvelope = messageEnvelope(52, "tenant-a", aggregate, 52);
+  const makeMessage = (envelope) => ({ envelope, orderingKey: `tenant-a/repo-a/${aggregate}`, attributes: { correlationId: envelope.correlationId, causationId: envelope.causationId } });
+  try {
+    await database.tenantTransaction("tenant-a", "READ COMMITTED", (client) => client.query("DELETE FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=ANY($1::uuid[])", [[firstEnvelope.id, secondEnvelope.id]]).then(() => undefined));
+    await transport.publish("evolution.events.v1", makeMessage(firstEnvelope)); await transport.publish("evolution.events.v1", makeMessage(secondEnvelope));
+    const queued = await database.pool.query("SELECT message_id,event_id FROM local_transport_messages WHERE tenant_id='tenant-a' AND event_id=ANY($1::uuid[])", [[firstEnvelope.id, secondEnvelope.id]]);
+    const firstId = queued.rows.find((row) => row.event_id === firstEnvelope.id).message_id;
+    await transport.delay("tenant-a", firstId, new Date(Date.now() + 60_000));
+    const deliveredSecond = await transport.pull("tenant-a", "evolution.events.v1", 10); const second = deliveredSecond.find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(second);
+    let expectedVersion = 1;
+    const apply = (delivery, version) => { if (version !== expectedVersion) return "GAP_DEFERRED"; expectedVersion++; return "APPLIED"; };
+    assert.equal(apply(second, 2), "GAP_DEFERRED"); await transport.defer("tenant-a", second.messageId, second.leaseToken, 60_000);
+    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE tenant_id='tenant-a' AND event_id=$1", [firstEnvelope.id]);
+    const delivery = await transport.pull("tenant-a", "evolution.events.v1", 10); const one = delivery.find((item) => item.message.envelope.id === firstEnvelope.id); assert.ok(one);
+    assert.equal(apply(one, 1), "APPLIED"); await transport.ack("tenant-a", one.messageId, one.leaseToken);
+    await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp() WHERE tenant_id='tenant-a' AND event_id=$1", [secondEnvelope.id]);
+    const retry = (await transport.pull("tenant-a", "evolution.events.v1", 10)).find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(retry);
+    assert.equal(apply(retry, 2), "APPLIED"); await transport.ack("tenant-a", retry.messageId, retry.leaseToken);
+  } finally { await database.close(); }
+});
+
 test("Pub/Sub emulator uses the same validated message contract and redelivers nack", { skip: !process.env.PUBSUB_EMULATOR_HOST }, async () => {
   const projectId = "agentics-test"; const client = new PubSub({ projectId });
   const suffix = `${process.pid}-${Date.now()}`; const topicName = "evolution.events.v1"; const deadLetterTopicName = "evolution.deadletter.v1";

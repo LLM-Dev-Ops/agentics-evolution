@@ -36,4 +36,17 @@ export class PostgresLocalTransport implements EventTransport {
       "UPDATE local_transport_messages SET lease_token=NULL,lease_expires_at=NULL,available_at=transaction_timestamp() WHERE tenant_id=$1 AND message_id=$2 AND lease_token=$3 AND acked_at IS NULL",
       [tenantId, messageId, leaseToken]).then(() => undefined));
   }
+  async defer(tenantId: string, messageId: string, leaseToken: string, delayMs: number): Promise<void> {
+    if (!Number.isSafeInteger(delayMs) || delayMs < 0 || delayMs > 86_400_000) throw new TypeError("INVALID_DEFER_DELAY");
+    await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query(
+      `UPDATE local_transport_messages SET lease_token=NULL,lease_expires_at=NULL,
+       available_at=transaction_timestamp()+($4::text||' milliseconds')::interval WHERE tenant_id=$1 AND message_id=$2 AND lease_token=$3 AND acked_at IS NULL`,
+      [tenantId, messageId, leaseToken, delayMs]).then((result) => { if (result.rowCount !== 1) throw new Error("STALE_TRANSPORT_LEASE"); }));
+  }
+  async delay(tenantId: string, messageId: string, availableAt: Date): Promise<void> {
+    if (!Number.isFinite(availableAt.getTime())) throw new TypeError("INVALID_AVAILABLE_AT");
+    await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query(
+      "UPDATE local_transport_messages SET available_at=$3,lease_token=NULL,lease_expires_at=NULL WHERE tenant_id=$1 AND message_id=$2 AND acked_at IS NULL",
+      [tenantId, messageId, availableAt]).then((result) => { if (result.rowCount !== 1) throw new Error("MESSAGE_NOT_FOUND"); }));
+  }
 }
