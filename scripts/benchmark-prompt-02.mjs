@@ -46,7 +46,7 @@ const histories = Array.from({ length: 2_500 }, (_, historyIndex) => {
     const authority = authorityNames[step]; const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-benchmark`, authority,
       eventBinding: transitionEventBinding(base), verdict: ["VALIDATED", "ADMITTED", "PROVED", "AUTHORIZED"][step],
       proof: step === 0 ? { sourceValidated: true } : step === 1 ? { mutationAdmitted: true }
-        : step === 2 ? { gateReceipt: "cas://receipt", replayVerdict: "PASS", sequentialEvidence: "cas://alpha" }
+        : step === 2 ? { gateReceipt: `cas://sha256/${"b".repeat(64)}`, replayVerdict: "PASS", sequentialEvidence: `cas://sha256/${"c".repeat(64)}` }
         : { approvalId: "benchmark-approval", capability: "PROMOTE", constraints: {} } };
     const bytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature: sign(null, Buffer.from(canonicalJson(statement)), keys.privateKey).toString("base64") }));
     const digest = digestBytes(bytes); const signedReference = digestReference({ uri: `cas://sha256/${digest}`, sha256: digest }); evidenceStore.set(signedReference.uri, bytes);

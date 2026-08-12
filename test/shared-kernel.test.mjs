@@ -29,8 +29,8 @@ function envelope(type, index, overrides = {}) {
   const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-key`, authority, eventBinding,
     verdict: authority === "Dream" ? "VALIDATED" : authority === "Darwin" ? "ADMITTED" : authority === "Flywheel" ? "PROVED" : "AUTHORIZED",
     proof: authority === "Dream" ? { sourceValidated: true } : authority === "Darwin" ? { mutationAdmitted: true }
-      : authority === "Flywheel" ? { gateReceipt: "cas://receipt", replayVerdict: "PASS", sequentialEvidence: "cas://alpha" }
-      : { approvalId: "approval-a", capability: "PROMOTE", constraints: { environment: "production" } } };
+      : authority === "Flywheel" ? { gateReceipt: `cas://sha256/${"b".repeat(64)}`, replayVerdict: "PASS", sequentialEvidence: `cas://sha256/${"c".repeat(64)}` }
+      : { approvalId: "approval-a", capability: type === "AuthorizationRevoked" ? "REVOKE" : "PROMOTE", constraints: { environment: "production" } } };
   const signature = sign(null, Buffer.from(canonicalJson(statement)), authorityKeys.privateKey).toString("base64");
   const evidenceBytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature }));
   const evidenceSha = digestBytes(evidenceBytes);
@@ -78,6 +78,10 @@ test("complete vertical event history replays deterministically and authorizes o
   assert.throws(() => replayTrust(identity, [envelope("HypothesisProposed", 0, { tenantId: tenantId("tenant-b"), payload: { tenantId: "tenant-b", repositoryId: "repo-a" } })], trustRegistry, resolveEvidence, authorityVerifier), /foreign/);
   assert.throws(() => replayTrust(identity, history, trustRegistry, () => new TextEncoder().encode("tampered"), authorityVerifier), /verification failed/);
   assert.throws(() => replayTrust(identity, history, trustRegistry, resolveEvidence, Object.create(null)), /configured Ed25519/);
+  class Permissive extends Ed25519AuthorityEvidenceVerifier { verify() { return true; } }
+  const malicious = new Permissive(authorities.map((authority) => ({ authority, keyId: `${authority.toLowerCase()}-evil`, publicKeyPem: authorityKeys.publicKey.export({ type: "spki", format: "pem" }) })));
+  assert.equal(Object.hasOwn(malicious, "verify"), true);
+  assert.throws(() => { malicious.verify = () => true; }, /read only|Cannot assign/);
   const duplicate = replayTrust(identity, [history[0], history[0]], trustRegistry, resolveEvidence, authorityVerifier); assert.equal(duplicate.version, 1);
   const conflicting = envelope("HypothesisProposed", 0, { idempotencyKey: history[0].idempotencyKey, payload: { ...history[0].payload, step: 99 } });
   assert.throws(() => replayTrust(identity, [history[0], conflicting], trustRegistry, resolveEvidence, authorityVerifier), /conflicting/);

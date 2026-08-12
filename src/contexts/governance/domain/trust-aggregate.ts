@@ -48,7 +48,14 @@ export function applyTrustEvent(state: TrustAggregate, event: EvolutionEnvelope,
       : nextCommand === "GenerateCandidate" ? { mutationAdmitted: true }
       : nextCommand === "AcceptEvaluation" ? { proofVerified: true } : { independentAuthorization: true };
     nextState = transitionTrust(state.state, nextCommand, evidence);
-  } else if (event.type === "AuthorizationRevoked" && state.state === "AUTHORIZED") revoked = true;
+  } else if (event.type === "AuthorizationRevoked" && state.state === "AUTHORIZED") {
+    if (event.evidence.length === 0) throw new TypeError("revocation requires Governance evidence");
+    for (const reference of event.evidence) {
+      const bytes = resolveEvidence(reference); verifyDigest(reference, bytes);
+      if (!verifier.verify({ authority: "Governance", event, reference, bytes })) throw new TypeError("Governance signed revocation evidence rejected");
+    }
+    revoked = true;
+  }
   else throw new TypeError(`unknown or invalid trust event: ${event.type}`);
   const historyDigest = digestBytes(new TextEncoder().encode(canonicalJson({ previous: state.historyDigest, event: eventDigest, version: state.version + 1 })));
   return Object.freeze({ ...state, state: nextState, revoked, version: state.version + 1, historyDigest,

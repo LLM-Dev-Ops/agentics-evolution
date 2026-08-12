@@ -36,6 +36,8 @@ export class Ed25519AuthorityEvidenceVerifier {
       return [root.keyId, { authority: root.authority, key: createPublicKey(root.publicKeyPem) }];
     }));
     if (this.#keys.size !== roots.length) throw new TypeError("duplicate authority key ID");
+    Object.defineProperty(this, "verify", { value: this.verify.bind(this), writable: false, configurable: false });
+    Object.freeze(this);
   }
   verify({ authority, event, bytes }: { authority: TransitionAuthority; event: EvolutionEnvelope; reference: DigestReference; bytes: Uint8Array }): boolean {
     if (bytes.byteLength > 65_536) return false;
@@ -50,7 +52,13 @@ export class Ed25519AuthorityEvidenceVerifier {
       statement.verdict !== verdict || statement.eventBinding !== transitionEventBinding(event) || !/^[A-Za-z0-9+/]+={0,2}$/.test(statement.signature)) return false;
     const proofKeys = authority === "Dream" ? ["sourceValidated"] : authority === "Darwin" ? ["mutationAdmitted"]
       : authority === "Flywheel" ? ["gateReceipt", "replayVerdict", "sequentialEvidence"] : ["approvalId", "capability", "constraints"];
-    if (proofKeys.some((key) => !Object.hasOwn(statement.proof, key))) return false;
+    if (Object.keys(statement.proof).sort().join(",") !== [...proofKeys].sort().join(",")) return false;
+    const isCas = (value: unknown) => typeof value === "string" && /^cas:\/\/sha256\/[a-f0-9]{64}$/.test(value);
+    if ((authority === "Dream" && statement.proof.sourceValidated !== true) ||
+      (authority === "Darwin" && statement.proof.mutationAdmitted !== true) ||
+      (authority === "Flywheel" && (!isCas(statement.proof.gateReceipt) || statement.proof.replayVerdict !== "PASS" || !isCas(statement.proof.sequentialEvidence))) ||
+      (authority === "Governance" && (typeof statement.proof.approvalId !== "string" || statement.proof.approvalId.length < 3 ||
+        !["PROMOTE", "REVOKE"].includes(String(statement.proof.capability)) || !statement.proof.constraints || typeof statement.proof.constraints !== "object" || Array.isArray(statement.proof.constraints)))) return false;
     const unsigned = canonicalJson({ schema: statement.schema, keyId: statement.keyId, authority: statement.authority,
       eventBinding: sha256Digest(statement.eventBinding), verdict: statement.verdict, proof: statement.proof });
     return verify(null, Buffer.from(unsigned), root.key, Buffer.from(statement.signature, "base64"));
