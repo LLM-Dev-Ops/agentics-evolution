@@ -14,6 +14,9 @@ export interface SignedKeyManifestCheckpoint {
 export interface KeyManifestCheckpointVerifier {
   verify(value: { readonly manifestDigest: DigestReference; readonly signerKeyId: string; readonly signature: string }): Promise<boolean>;
 }
+export interface TrustedKeyManifestSource {
+  loadVerifiedHead(scope: { tenantId: TenantId; repositoryId: RepositoryId; environment: string }): Promise<SignedKeyManifestCheckpoint>;
+}
 
 /** Append-only checkpoints with a compare-and-swap head and atomic outbox notification. */
 export class PostgresKeyManifestStore {
@@ -40,6 +43,22 @@ export class PostgresKeyManifestStore {
       await client.query(`INSERT INTO outbox(tenant_id,event_id,repository_id,aggregate_id,topic,ordering_key,envelope)
         VALUES($1,$2,$3,$4,'evolution.events.v1',$5,$6)`, [scope.tenantId, eventId, scope.repositoryId, `key-manifest:${scope.environment}`, `${scope.tenantId}/${scope.repositoryId}/key-manifest:${scope.environment}`, envelope]);
     });
+  }
+  async loadVerifiedHead(scope: { tenantId: TenantId; repositoryId: RepositoryId; environment: string }): Promise<SignedKeyManifestCheckpoint> {
+    const checkpoint = await this.database.tenantTransaction(scope.tenantId, "REPEATABLE READ", async (client) => {
+      const result = await client.query(`SELECT c.manifest,c.manifest_digest,c.signer_key_id,c.signature,c.sequence
+        FROM key_manifest_heads h JOIN key_manifest_checkpoints c USING(tenant_id,repository_id,environment,sequence)
+        WHERE h.tenant_id=$1 AND h.repository_id=$2 AND h.environment=$3`, [scope.tenantId, scope.repositoryId, scope.environment]);
+      const row = result.rows[0];
+      if (!row) throw new TypeError("KEY_MANIFEST_HEAD_NOT_FOUND");
+      if (Number(row.sequence) !== Number(row.manifest.sequence)) throw new TypeError("KEY_MANIFEST_HEAD_SEQUENCE_MISMATCH");
+      return Object.freeze({ manifest: row.manifest as KeyManifest,
+        manifestDigest: digestReference({ uri: `cas://sha256/${row.manifest_digest}`, sha256: row.manifest_digest }),
+        signerKeyId: String(row.signer_key_id), signature: String(row.signature) });
+    });
+    const calculated = digestBytes(new TextEncoder().encode(canonicalJson(checkpoint.manifest)));
+    if (calculated !== checkpoint.manifestDigest.sha256 || !await this.verifier.verify(checkpoint)) throw new TypeError("KEY_MANIFEST_HEAD_NOT_TRUSTED");
+    return checkpoint;
   }
   static checkpoint(manifest: KeyManifest, signerKeyId: string, signature: string): SignedKeyManifestCheckpoint {
     const sha256 = digestBytes(new TextEncoder().encode(canonicalJson(manifest)));

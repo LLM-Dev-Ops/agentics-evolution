@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canon, makeSigner } from "@metaharness/flywheel";
 import { verifyBundle } from "../packages/offline-verifier/index.mjs";
+import { createRvfStore, rvfClose, rvfIngest } from "ruvector";
 
 const sha = bytes => createHash("sha256").update(bytes).digest("hex");
 async function fixture() {
@@ -13,8 +14,10 @@ async function fixture() {
   const object = Buffer.from("immutable artifact\n"); const objectDigest = sha(object); await writeFile(join(root, "objects", objectDigest), object);
   const { privateKey: rootPrivate, publicKey: rootPublic } = generateKeyPairSync("ed25519");
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const rvf = Buffer.from("native-rvf-fixture"); const idmap = Buffer.from('{"candidate":1}');
-  await writeFile(join(root, "witness.rvf"), rvf); await writeFile(join(root, "witness.idmap.json"), idmap);
+  const rvfPath = join(root, "witness.rvf"); const store = await createRvfStore(rvfPath, { dimensions: 3, metric: "cosine" });
+  await rvfIngest(store, [{ id: "candidate", vector: [1, 0, 0] }]); await rvfClose(store);
+  const rvf = await readFile(rvfPath); const idmap = await readFile(`${rvfPath}.idmap.json`);
+  await writeFile(join(root, "witness.idmap.json"), idmap); await rm(`${rvfPath}.idmap.json`);
   const orderedContent = [{ uri: `cas://sha256/${objectDigest}`, sha256: objectDigest }];
   const contentSetDigest = sha(Buffer.from(canon({ rvfSha256: sha(rvf), identityMapSha256: sha(idmap), orderedContent })));
   const payload = { schema: "agentics.artifact-manifest/v1", artifact: { uri: `cas://sha256/${objectDigest}`, sha256: objectDigest }, dependencies: [],

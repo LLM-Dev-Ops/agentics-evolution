@@ -30,7 +30,7 @@ function exactKeys(value, keys, reason) {
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) throw new Error(reason);
 }
 
-export async function verifyBundle(root, trustedCheckpoint) {
+export async function verifyBundle(root, trustedCheckpoint, options = {}) {
   if (!/^[a-f0-9]{64}$/.test(trustedCheckpoint)) throw new Error("INVALID_TRUST_CHECKPOINT");
   const files = await safeFiles(root); const index = await json(root, "bundle.json");
   exactKeys(index, ["schema", "manifest", "objects", "receipt", "keyManifest", "rvf"], "INVALID_BUNDLE_INDEX");
@@ -66,6 +66,10 @@ export async function verifyBundle(root, trustedCheckpoint) {
       orderedContent: index.rvf.orderedContent }));
     if (sha256(contentSet) !== manifest.payload.rvfWitness.contentSetDigest.sha256 || manifest.payload.rvfWitness.format !== "ruvector-rvf")
       throw new Error("RVF_WITNESS_MISMATCH");
+    const nativeVerifier = options.rvfVerifier ?? (await import("./native-rvf-plugin.mjs")).verifyNativeRvf;
+    let idmap;
+    try { idmap = JSON.parse(identityMapBytes); } catch { throw new Error("RVF_NATIVE_IDENTITY_MAP_INVALID"); }
+    await nativeVerifier({ rvfBytes, identityMapBytes, expectedVectorCount: Object.keys(idmap.idToLabel ?? {}).length });
     rvfFiles.push(index.rvf.path, index.rvf.identityMapPath);
   } else if (index.rvf !== null) throw new Error("UNBOUND_RVF_BUNDLE");
   const declared = new Set(["bundle.json", index.manifest.path, index.receipt.path, index.keyManifest.path, ...index.objects.map(entry => entry.path), ...rvfFiles]);

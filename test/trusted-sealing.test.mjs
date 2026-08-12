@@ -4,9 +4,11 @@ import test from "node:test";
 import { CloudKmsEd25519Provider } from "../dist/infrastructure/artifact-lineage/cloud-kms-ed25519.js";
 import { PostgresKeyManifestStore } from "../dist/infrastructure/artifact-lineage/key-manifest-store.js";
 import { TrustedManifestSealer } from "../dist/infrastructure/artifact-lineage/trusted-manifest-sealer.js";
+import { NativeRvfWitnessAdapter } from "../dist/infrastructure/upstream-ruvector/rvf-witness-adapter.js";
 import { activateKey, createKeyManifest } from "../dist/contexts/artifact-lineage/domain/key-manifest.js";
 import { sealedManifest, stagedManifest } from "../dist/contexts/artifact-lineage/domain/artifact-manifest.js";
 import { digestBytes, digestReference, repositoryId, tenantId } from "../dist/index.js";
+import { canonicalJson } from "../dist/shared-kernel/immutable.js";
 
 const keyName = "projects/p/locations/global/keyRings/r/cryptoKeys/k/cryptoKeyVersions/7";
 
@@ -68,8 +70,37 @@ test("trusted sealing rejects tampering/revoked purpose and atomically emits the
     calls.push(sql); return { rows: [], rowCount: sql.startsWith("UPDATE artifact_manifests") ? 1 : 1 };
   } }) };
   const cas = { exists: async () => true, read: async () => artifactBytes };
-  await new TrustedManifestSealer(database, cas).seal(sealed, keyManifest);
+  const keySource = { loadVerifiedHead: async () => ({ manifest: keyManifest }) };
+  const rvfVerifier = new NativeRvfWitnessAdapter();
+  const access = { issueRead: () => ({ receipt: "trusted-read" }) };
+  const sealer = new TrustedManifestSealer(database, cas, keySource, rvfVerifier, access);
+  await sealer.seal(sealed, "production");
   assert.ok(calls.some((sql) => sql.includes("INSERT INTO outbox")));
-  await assert.rejects(new TrustedManifestSealer(database, cas).seal({ ...sealed, signature: Buffer.alloc(64).toString("base64") }, keyManifest), /MANIFEST_SIGNATURE_INVALID/);
-  await assert.rejects(new TrustedManifestSealer(database, cas).seal(sealed, { ...keyManifest, active: {} }), /NO_ACTIVE_SIGNING_KEY/);
+  await assert.rejects(sealer.seal({ ...sealed, signature: Buffer.alloc(64).toString("base64") }, "production"), /MANIFEST_SIGNATURE_INVALID/);
+  const noKey = new TrustedManifestSealer(database, cas, { loadVerifiedHead: async () => ({ manifest: { ...keyManifest, active: {} } }) }, rvfVerifier, access);
+  await assert.rejects(noKey.seal(sealed, "production"), /NO_ACTIVE_SIGNING_KEY/);
+  const attacker = generateKeyPairSync("ed25519");
+  const attackerSignature = sign(null, Buffer.from(staged.manifestDigest.sha256, "hex"), attacker.privateKey).toString("base64");
+  await assert.rejects(sealer.seal(sealedManifest(staged, "attacker/1", attackerSignature), "production"), /MANIFEST_SIGNING_KEY_NOT_TRUSTED/);
+  const wrongSize = new TrustedManifestSealer(database, { ...cas, read: async () => Buffer.from("short") }, keySource, rvfVerifier, access);
+  await assert.rejects(wrongSize.seal(sealed, "production"), /ARTIFACT_SIZE_MISMATCH/);
+});
+
+test("trusted sealing rejects a digest-shaped fake RVF that cannot pass native open/status/query", async () => {
+  const pair = generateKeyPairSync("ed25519"); const keyManifest = activateKey(createKeyManifest(makeKey(pair)), "artifact/1");
+  const fake = Buffer.from("not-an-rvf-container"); const fakeSha = digestBytes(fake);
+  const fakeRef = digestReference({ uri: `cas://sha256/${fakeSha}`, sha256: fakeSha });
+  const idmap = Buffer.from("{}");
+  const contentSha = digestBytes(new TextEncoder().encode(canonicalJson({ rvfSha256: fakeSha, identityMapSha256: digestBytes(idmap), orderedContent: [] })));
+  const contentRef = digestReference({ uri: `cas://sha256/${contentSha}`, sha256: contentSha });
+  const staged = stagedManifest({ schema: "agentics.artifact-manifest/v1", tenantId: scope.tenantId, repositoryId: scope.repositoryId,
+    artifact: fakeRef, mediaType: "application/x-rvf", size: fake.length, producer: "attacker", source: { provider: "github", repository: "org/repo", revision: "b".repeat(40), clean: true },
+    dependencies: [], classification: "INTERNAL", retention: "CANDIDATE_ARCHIVE", createdAt: "2026-08-12T00:00:00.000Z",
+    rvfWitness: { rvfDigest: fakeRef, contentSetDigest: contentRef, format: "ruvector-rvf", formatVersion: "ruvector@0.2.41/rvf@0.2.3" } });
+  const signature = sign(null, Buffer.from(staged.manifestDigest.sha256, "hex"), pair.privateKey).toString("base64");
+  const database = { tenantTransaction: async () => { throw new Error("database must not be reached"); } };
+  const cas = { exists: async () => true, read: async () => fake };
+  const bundle = { witness: staged.payload.rvfWitness, rvfBytes: fake, identityMapBytes: idmap, vectorCount: 1, dimensions: 3, entryIds: ["fake"] };
+  const sealer = new TrustedManifestSealer(database, cas, { loadVerifiedHead: async () => ({ manifest: keyManifest }) }, new NativeRvfWitnessAdapter(), { issueRead: () => ({ receipt: "trusted-read" }) });
+  await assert.rejects(sealer.seal(sealedManifest(staged, "artifact/1", signature), "production", bundle), /RVF_WITNESS_MISMATCH|RVF_CONTAINER_INVALID/);
 });
