@@ -119,3 +119,10 @@ test("rejects event aliases whose type discriminator is not a matching literal",
   }));
   expectFailure(result, /readonly literal type matching its name/);
 });
+
+test("resolves local alias indirection before validating published events", async () => {
+  const result = validate(await fixture({
+    "src/contexts/dream/published-language.ts": "import type { EvolutionEnvelope } from '../../shared-kernel/evolution-envelope.js';\ntype Published<T extends Record<string, unknown>> = EvolutionEnvelope<T>;\nexport type Hypothesis = Published<Record<string, unknown>> & { readonly type: 'Hypothesis' };\n"
+  }));
+  expectFailure(result, /must use a past-tense name/);
+});

@@ -82,11 +82,24 @@ function checkReference(file, specifier, isExport) {
   if (isExport) errors.push(`${from.location}: context public surface cannot re-export another context`);
 }
 function checkEvents(ast, location) {
+  const envelopeTypes = new Set(["EvolutionEnvelope"]);
+  for (const statement of ast.statements) if (ts.isImportDeclaration(statement) && statement.importClause?.namedBindings && ts.isNamedImports(statement.importClause.namedBindings)) {
+    for (const element of statement.importClause.namedBindings.elements)
+      if ((element.propertyName?.text ?? element.name.text) === "EvolutionEnvelope") envelopeTypes.add(element.name.text);
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const statement of ast.statements) if (ts.isTypeAliasDeclaration(statement) &&
+      [...envelopeTypes].some((name) => new RegExp(`(?:^|\\W)${name}(?:\\W|$)`).test(statement.type.getText(ast))) && !envelopeTypes.has(statement.name.text)) {
+      envelopeTypes.add(statement.name.text); changed = true;
+    }
+  }
   const inspect = (node) => {
     if (ts.isTypeAliasDeclaration(node) && node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword) &&
-        (node.type.getText(ast).includes("EvolutionEnvelope") || /Event$/.test(node.name.text))) {
+        ([...envelopeTypes].some((name) => new RegExp(`(?:^|\\W)${name}(?:\\W|$)`).test(node.type.getText(ast))) || /Event$/.test(node.name.text))) {
       const representation = node.type.getText(ast);
-      if (!/(?:^|\W)EvolutionEnvelope\s*</.test(representation))
+      if (![...envelopeTypes].some((name) => new RegExp(`(?:^|\\W)${name}\\s*<`).test(representation)))
         errors.push(`${location}: published event alias '${node.name.text}' must use EvolutionEnvelope`);
       if (!/(?:ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(node.name.text))
         errors.push(`${location}: published event alias '${node.name.text}' must use a past-tense name`);
