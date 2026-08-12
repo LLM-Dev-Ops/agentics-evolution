@@ -9,7 +9,7 @@ import {
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
-const configuration = { connectionString: url, maxConnections: 64, statementTimeoutMs: 10_000, lockTimeoutMs: 2_000 };
+const configuration = { connectionString: url, maxConnections: 64, statementTimeoutMs: 10_000, lockTimeoutMs: 2_000, enforceRuntimeRole: false };
 
 function messageEnvelope(seed, tenant = "tenant-a", aggregate = "transport-a", keySeed = 3) {
   const bytes = new TextEncoder().encode(`evidence-${seed}`); const digest = digestBytes(bytes);

@@ -6,6 +6,7 @@ import { consumeOnce, OutboxRelay, PostgresPersistence } from "../dist/index.js"
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
 const worker = new URL("fixtures/postgres-crash-worker.mjs", import.meta.url).pathname;
+const databaseConfig = { connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000, enforceRuntimeRole: false };
 
 async function killAt(stage, marker, tenant, eventId) {
   const child = spawn(process.execPath, [worker, stage, tenant, eventId], { env: { ...process.env, TEST_DATABASE_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
@@ -32,7 +33,7 @@ test("SIGKILL after commit leaves one logical outbox event that restart publishe
   const tenant = `crash-after-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000022";
   await killAt("after-commit", "COMMITTED", tenant, eventId);
   const published = []; const transport = { publish: async (_topic, message) => { published.push(message.envelope.id); return { messageId: "broker-1" }; } };
-  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  const database = new PostgresPersistence(databaseConfig);
   try {
     const relay = new OutboxRelay(database, transport); assert.equal(await relay.drain(tenant), 1); assert.deepEqual(published, [eventId]);
     assert.equal(await relay.drain(tenant), 0);
@@ -51,7 +52,7 @@ test("broker acceptance before delivery mark may republish but inbox applies one
     if (loseAcknowledgement) { loseAcknowledgement = false; throw new Error("BROKER_ACCEPTED_ACK_LOST"); }
     return { messageId: "broker-retry" };
   } };
-  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  const database = new PostgresPersistence(databaseConfig);
   try {
     const relay = new OutboxRelay(database, transport);
     await assert.rejects(relay.drain(tenant), /BROKER_ACCEPTED_ACK_LOST/);
@@ -72,7 +73,7 @@ test("broker acceptance before delivery mark may republish but inbox applies one
 test("terminal publish failure is attributable and requires authorization to redrive", { skip: !url }, async () => {
   const tenant = `dead-letter-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000024";
   await killAt("after-commit", "COMMITTED", tenant, eventId);
-  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  const database = new PostgresPersistence(databaseConfig);
   try {
     const failing = new OutboxRelay(database, { publish: async () => { throw new Error("BROKER_UNAVAILABLE"); } }, 1);
     await assert.rejects(failing.drain(tenant), /BROKER_UNAVAILABLE/);

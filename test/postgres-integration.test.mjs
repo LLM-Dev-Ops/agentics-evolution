@@ -27,6 +27,8 @@ test("PostgreSQL 16 migrations, FORCE RLS and append-only events execute on real
 });
 
 test("actual login role is non-bypass and pooled SET LOCAL tenant state cannot bleed", { skip: !url }, async () => {
+  const unsafe = new PostgresPersistence({ connectionString: url, maxConnections: 1, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  await assert.rejects(unsafe.tenantTransaction("unsafe", "READ COMMITTED", async () => undefined), /UNSAFE_POSTGRES_RUNTIME_ROLE/); await unsafe.close();
   const role = "agentics_test_runtime"; const password = "agentics-test-only";
   const admin = new Client({ connectionString: url }); await admin.connect();
   await admin.query(`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='${role}') THEN CREATE ROLE ${role} LOGIN PASSWORD '${password}' NOSUPERUSER NOBYPASSRLS; END IF; END $$`);

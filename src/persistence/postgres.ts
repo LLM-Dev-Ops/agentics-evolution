@@ -4,7 +4,8 @@ import { canonicalJson } from "../shared-kernel/immutable.js";
 import { digestBytes } from "../shared-kernel/digest.js";
 const { Pool } = pg;
 
-export interface PersistenceConfig { readonly connectionString: string; readonly maxConnections: number; readonly statementTimeoutMs: number; readonly lockTimeoutMs: number; }
+export interface PersistenceConfig { readonly connectionString: string; readonly maxConnections: number; readonly statementTimeoutMs: number; readonly lockTimeoutMs: number;
+  readonly enforceRuntimeRole?: boolean; }
 export interface CommandWrite { readonly aggregateType: string; readonly expectedVersion: number; readonly state: Readonly<Record<string, unknown>>; readonly event: EvolutionEnvelope; readonly topic: "evolution.commands.v1" | "evolution.events.v1"; readonly traceparent?: string; }
 export interface CommandResult { readonly eventId: string; readonly aggregateVersion: number; readonly duplicate: boolean; }
 
@@ -12,9 +13,11 @@ export class PostgresPersistence {
   readonly pool: pg.Pool;
   readonly #statementTimeoutMs: number;
   readonly #lockTimeoutMs: number;
+  readonly #enforceRuntimeRole: boolean;
+  #runtimeVerified?: Promise<void>;
   constructor(config: PersistenceConfig) {
     this.pool = new Pool({ connectionString: config.connectionString, max: config.maxConnections, allowExitOnIdle: true });
-    this.#statementTimeoutMs = config.statementTimeoutMs; this.#lockTimeoutMs = config.lockTimeoutMs;
+    this.#statementTimeoutMs = config.statementTimeoutMs; this.#lockTimeoutMs = config.lockTimeoutMs; this.#enforceRuntimeRole = config.enforceRuntimeRole ?? true;
   }
   async close(): Promise<void> { await this.pool.end(); }
   async verifyRuntimeSafety(): Promise<void> {
@@ -24,6 +27,7 @@ export class PostgresPersistence {
     if (!role || role.rolsuper || role.rolbypassrls || !role.app_member) throw new Error("UNSAFE_POSTGRES_RUNTIME_ROLE");
   }
   async tenantTransaction<T>(tenant: string, isolation: "READ COMMITTED" | "SERIALIZABLE", operation: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+    if (this.#enforceRuntimeRole) await (this.#runtimeVerified ??= this.verifyRuntimeSafety());
     const client = await this.pool.connect();
     try {
       await client.query(`BEGIN ISOLATION LEVEL ${isolation}`);
@@ -35,7 +39,7 @@ export class PostgresPersistence {
   }
   async executeCommand(write: CommandWrite): Promise<CommandResult> {
     const envelope = write.event; const requestDigest = digestBytes(new TextEncoder().encode(canonicalJson({ expectedVersion: write.expectedVersion, state: write.state, event: envelope })));
-    return this.tenantTransaction(envelope.tenantId, "SERIALIZABLE", async (client) => {
+    return withSerializableRetry(() => this.tenantTransaction(envelope.tenantId, "SERIALIZABLE", async (client) => {
       const existing = await client.query<{ request_digest: string; response: CommandResult }>(
         "SELECT request_digest,response FROM command_idempotency WHERE tenant_id=$1 AND idempotency_key=$2", [envelope.tenantId, envelope.idempotencyKey]);
       if (existing.rowCount) {
@@ -58,7 +62,7 @@ export class PostgresPersistence {
       const response: CommandResult = { eventId: envelope.id, aggregateVersion: nextVersion, duplicate: false };
       await client.query("INSERT INTO command_idempotency(tenant_id,idempotency_key,request_digest,response) VALUES($1,$2,$3,$4)", [envelope.tenantId, envelope.idempotencyKey, requestDigest, response]);
       return response;
-    });
+    }), { maxAttempts: 5, baseDelayMs: 5, deadlineMs: Date.now() + 5_000 });
   }
 }
 
