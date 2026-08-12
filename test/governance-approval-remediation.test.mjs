@@ -1,19 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import{generateKeyPairSync,sign}from"node:crypto";import{canonicalJson}from"../dist/shared-kernel/immutable.js";
 import { money } from "../dist/index.js";
-import { decisionDigest, VerifiedApprovalAuthority, GovernanceEnforcementMiddleware, DelegationChainResolver } from "../dist/contexts/governance/application/index.js";
+import { decisionDigest, VerifiedApprovalAuthority,Ed25519PromotionApprovalVerifier, GovernanceEnforcementMiddleware, DelegationChainResolver } from "../dist/contexts/governance/application/index.js";
 
 const envelope=(overrides={})=>({action:"promotion.authorize",tenantId:"tenant-a",repositories:["repo-a"],paths:[],tools:[],network:[],providers:["private"],models:[],regions:["us"],classification:"RESTRICTED",spend:money(1n,"USD"),concurrency:1,expiresAt:"2030-01-01T00:00:00Z",depth:3,uses:1,...overrides});
 const identity=(overrides={})=>({kind:"HUMAN",subject:"bob",tenantId:"tenant-a",issuer:"https://issuer",audience:"api",groups:["release-approvers"],serviceAccount:null,mfa:true,expiresAt:"2030-01-01T00:00:00Z",...overrides});
 const record={authorizationId:"auth",requesterSubject:"https://issuer#alice",candidateDigest:"ab".repeat(32),evidenceDigest:"cd".repeat(32),policyEpoch:"epoch-1",envelope:envelope()};
 const unsigned={schema:"agentics.governance-decision/v1",outcome:"ALLOW",decisionId:"decision",evidenceDigest:record.evidenceDigest,policyEpoch:record.policyEpoch,scope:{tenantId:"tenant-a",repositoryId:"repo-a",action:"promotion.authorize"}};
-const binding={...unsigned,decisionDigest:decisionDigest(unsigned)};
+const pair=generateKeyPairSync("ed25519"),verifier=new Ed25519PromotionApprovalVerifier({k:pair.publicKey.export({type:"spki",format:"pem"})});const prepared={...unsigned,keyId:"k"},digest=decisionDigest(prepared),payload={...prepared,decisionDigest:digest};const binding={...payload,signature:sign(null,Buffer.from(canonicalJson(payload)),pair.privateKey).toString("base64url")};
 
-test("verified approval requires human MFA, configured group, canonical subject SoD and exact bindings",async()=>{let stored=0;const authority=new VerifiedApprovalAuthority(["release-approvers"],{verify:async()=>true},{approveBound:async()=>{stored++;}});
+test("verified approval requires human MFA, configured group, canonical subject SoD and exact bindings",async()=>{let stored=0;const authority=new VerifiedApprovalAuthority(["release-approvers"],verifier,{approveBound:async()=>{stored++;}});
  await authority.approve(identity(),record,binding);assert.equal(stored,1);
  for(const invalid of [identity({kind:"SERVICE",serviceAccount:"bob@svc"}),identity({mfa:false}),identity({groups:["other"]}),identity({subject:"alice"})])await assert.rejects(authority.approve(invalid,record,binding),/APPROVER_REQUIRED|DUTIES/);
  await assert.rejects(authority.approve(identity(),record,{...binding,policyEpoch:"old"}),/BINDING/);
- await assert.rejects(new VerifiedApprovalAuthority(["release-approvers"],{verify:async()=>false},{approveBound:async()=>{}}).approve(identity(),record,binding),/EVIDENCE/);
+ assert.throws(()=>new VerifiedApprovalAuthority(["release-approvers"],{verify:()=>true},{approveBound:async()=>{}}),/PINNED/);class Evil extends Ed25519PromotionApprovalVerifier{}assert.throws(()=>new VerifiedApprovalAuthority(["release-approvers"],new Evil({k:pair.publicKey.export({type:"spki",format:"pem"})}),{approveBound:async()=>{}}),/PINNED/);
 });
 
 test("enforcement middleware rejects unnamed and drifted decisions and durably audits bound decisions",async()=>{const audits=[];const verifier={verify:async()=>identity()};const request={tenantId:"tenant-a",repositoryId:"repo-a",action:"promotion.authorize",policyEpoch:"epoch-1",correlationId:"corr"};
