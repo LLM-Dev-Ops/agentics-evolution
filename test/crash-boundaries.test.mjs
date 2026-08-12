@@ -1,0 +1,66 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import pg from "pg";
+import { consumeOnce, OutboxRelay, PostgresPersistence } from "../dist/index.js";
+const { Client } = pg;
+const url = process.env.TEST_DATABASE_URL;
+const worker = new URL("fixtures/postgres-crash-worker.mjs", import.meta.url).pathname;
+
+async function killAt(stage, marker, tenant, eventId) {
+  const child = spawn(process.execPath, [worker, stage, tenant, eventId], { env: { ...process.env, TEST_DATABASE_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
+  await new Promise((resolve, reject) => {
+    let output = ""; let errors = ""; child.stdout.on("data", (data) => { output += data; if (output.includes(marker)) resolve(); });
+    child.stderr.on("data", (data) => { errors += data; }); child.on("error", reject);
+    child.on("exit", (code) => { if (!output.includes(marker)) reject(new Error(`worker exited ${code}: ${errors}`)); });
+    setTimeout(() => reject(new Error(`worker missed ${marker}: ${output} ${errors}`)), 5_000).unref();
+  });
+  if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  if (child.exitCode === null && child.signalCode === null) await new Promise((resolve) => child.once("exit", resolve));
+}
+const runId = `${process.pid}-${Date.now()}`;
+
+test("SIGKILL after writes before commit exposes no aggregate, event, or outbox", { skip: !url }, async () => {
+  const tenant = `crash-before-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000021";
+  await killAt("before-commit", "BARRIER", tenant, eventId);
+  const client = new Client({ connectionString: url }); await client.connect();
+  try { for (const table of ["aggregates", "domain_events", "outbox"]) assert.equal((await client.query(`SELECT 1 FROM ${table} WHERE tenant_id=$1`, [tenant])).rowCount, 0); }
+  finally { await client.end(); }
+});
+
+test("SIGKILL after commit leaves one logical outbox event that restart publishes", { skip: !url }, async () => {
+  const tenant = `crash-after-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000022";
+  await killAt("after-commit", "COMMITTED", tenant, eventId);
+  const published = []; const transport = { publish: async (_topic, message) => { published.push(message.envelope.id); return { messageId: "broker-1" }; } };
+  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  try {
+    const relay = new OutboxRelay(database, transport); assert.equal(await relay.drain(tenant), 1); assert.deepEqual(published, [eventId]);
+    assert.equal(await relay.drain(tenant), 0);
+    const rows = await database.pool.query("SELECT published_at,broker_message_id FROM outbox WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+    assert.equal(rows.rowCount, 1); assert.equal(rows.rows[0].broker_message_id, "broker-1");
+  } finally { await database.close(); }
+});
+
+test("broker acceptance before delivery mark may republish but inbox applies one effect", { skip: !url }, async () => {
+  const tenant = `crash-after-ack-${runId}`; const eventId = "0198a41d-2c00-7000-8000-000000000023";
+  await killAt("after-commit", "COMMITTED", tenant, eventId);
+  const physical = [];
+  let loseAcknowledgement = true;
+  const transport = { publish: async (_topic, message) => {
+    physical.push(message);
+    if (loseAcknowledgement) { loseAcknowledgement = false; throw new Error("BROKER_ACCEPTED_ACK_LOST"); }
+    return { messageId: "broker-retry" };
+  } };
+  const database = new PostgresPersistence({ connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000 });
+  try {
+    const relay = new OutboxRelay(database, transport);
+    await assert.rejects(relay.drain(tenant), /BROKER_ACCEPTED_ACK_LOST/);
+    await database.pool.query("UPDATE outbox SET lease_expires_at=transaction_timestamp()-interval '1 second' WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+    assert.equal(await relay.drain(tenant), 1);
+    assert.equal(physical.length, 2, "physical duplicate is expected at the acknowledgement boundary");
+    let effects = 0;
+    const first = await consumeOnce(database, tenant, "crash-consumer", physical[0].envelope, async () => ++effects);
+    const duplicate = await consumeOnce(database, tenant, "crash-consumer", physical[1].envelope, async () => ++effects);
+    assert.equal(first.duplicate, false); assert.equal(duplicate.duplicate, true); assert.equal(effects, 1);
+  } finally { await database.close(); }
+});

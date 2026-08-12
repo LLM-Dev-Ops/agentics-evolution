@@ -40,7 +40,7 @@
     "migrate": "node scripts/migrate.mjs",
     "verify:postgres": "node scripts/verify-postgres.mjs",
     "benchmark:prompt-03": "node scripts/benchmark-prompt-03.mjs",
-    "verify:prompt-03": "npm run lint && npm run typecheck && npm run build && npm run migrate && npm run verify:postgres && node --test test/postgres-integration.test.mjs test/persistence-concurrency.test.mjs && npm run benchmark:prompt-03",
+    "verify:prompt-03": "npm run lint && npm run typecheck && npm run build && npm run migrate && npm run verify:postgres && node --test test/postgres-integration.test.mjs test/persistence-concurrency.test.mjs test/crash-boundaries.test.mjs && npm run benchmark:prompt-03",
     "verify:prompt-02": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run property:prompt-02 && npm run conformance && npm run probe:upstreams && npm run benchmark:foundation && npm run benchmark:prompt-02 && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance:prompt-02 && npm run verify:evidence",
     "verify:prompt-01": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run conformance && npm run probe:upstreams && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance && npm run verify:evidence && npm run verify:reproducibility && npm run benchmark:foundation"
   },
