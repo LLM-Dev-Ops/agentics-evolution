@@ -51,7 +51,7 @@ const statement = {
     },
     runDetails: {
       builder: { id: "https://github.com/LLM-Dev-Ops/agentics-evolution/.github/workflows/verify.yml" },
-      metadata: { invocationId: `${commit}:prompt-01`, startedOn: new Date().toISOString(), finishedOn: new Date().toISOString() }
+      metadata: { invocationId: `${commit}:${prompt05 ? "prompt-05" : prompt04 ? "prompt-04" : prompt03 ? "prompt-03" : prompt02 ? "prompt-02" : "prompt-01"}`, startedOn: new Date().toISOString(), finishedOn: new Date().toISOString() }
     }
   }
 };

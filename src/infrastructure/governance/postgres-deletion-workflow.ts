@@ -1,8 +1,11 @@
 import { withSerializableRetry, type PostgresPersistence } from "../../persistence/postgres.js";
 import type { DeletionBoundary, DeletionCategory, DeletionReceiptSigner, DeletionResult, DeletionTombstone, SignedDeletionReceipt } from "../../contexts/governance/application/privacy-boundaries.js";
 import {consumeDeletionAuthorization,type VerifiedDeletionAuthorization}from"../../contexts/governance/application/deletion-authorization.js";
+import type{DeletionApprovalEvidence}from"../../contexts/governance/application/deletion-authorization.js";
+import{canonicalJson}from"../../shared-kernel/immutable.js";import{digestBytes}from"../../shared-kernel/digest.js";
 
 const categories: readonly DeletionCategory[] = ["DATABASE", "ARTIFACT", "EVENT", "CACHE", "VECTOR", "KEY", "BACKUP_OBLIGATION"];
+export interface DeletionResumeIdentity{readonly tenantId:string;readonly repositoryId:string;readonly requestId:string;}
 export class PostgresDeletionWorkflow {
   private readonly adapters: Map<DeletionCategory, DeletionBoundary>;
   constructor(private readonly database: PostgresPersistence, boundaries: readonly DeletionBoundary[], private readonly signer: DeletionReceiptSigner, private readonly now: () => Date = () => new Date()) {
@@ -21,7 +24,8 @@ export class PostgresDeletionWorkflow {
     const blocked = await this.database.tenantTransaction(tenantId, "READ COMMITTED", (client) => client.query("SELECT 1 FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2", [tenantId,repositoryId]));
     if (blocked.rowCount) throw new TypeError("REPOSITORY_TOMBSTONED");
   }
-  async resume(tombstone: DeletionTombstone): Promise<SignedDeletionReceipt> {
+  async resume(identity: DeletionResumeIdentity): Promise<SignedDeletionReceipt> {
+    const tombstone=await this.hydrate(identity);
     for (const category of categories) {
       const claim = await retry(() => this.database.tenantTransaction(tombstone.tenantId, "SERIALIZABLE", async (client) => {
         const row = await client.query("SELECT state,operation_key FROM governance_deletion_jobs WHERE tenant_id=$1 AND repository_id=$2 AND request_id=$3 AND category=$4 FOR UPDATE", [tombstone.tenantId,tombstone.repositoryId,tombstone.requestId,category]);
@@ -42,6 +46,10 @@ export class PostgresDeletionWorkflow {
     }
     return this.complete(tombstone);
   }
+  private async hydrate(identity:DeletionResumeIdentity):Promise<DeletionTombstone>{
+    if(!identity.tenantId||!identity.repositoryId||!identity.requestId)throw new TypeError("DELETION_RESUME_IDENTITY_REQUIRED");
+    return this.database.tenantTransaction(identity.tenantId,"READ COMMITTED",async client=>{const result=await client.query("SELECT tenant_id,repository_id,request_id,requested_at,policy_epoch,state,approval_binding FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2 AND request_id=$3",[identity.tenantId,identity.repositoryId,identity.requestId]);if(!result.rowCount)throw new TypeError("DELETION_TOMBSTONE_NOT_FOUND");const row=result.rows[0],approval=row.approval_binding as DeletionApprovalEvidence;const tombstone=Object.freeze({schema:"agentics.deletion-tombstone/v1" as const,tenantId:row.tenant_id,repositoryId:row.repository_id,requestId:row.request_id,requestedAt:new Date(row.requested_at).toISOString(),policyEpoch:Number(row.policy_epoch),state:"ACTIVE" as const});validatePersistedApproval(tombstone,approval);return tombstone;});
+  }
   private async complete(tombstone: DeletionTombstone): Promise<SignedDeletionReceipt> {
     return retry(() => this.database.tenantTransaction(tombstone.tenantId, "SERIALIZABLE", async (client) => {
       await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [`deletion-receipt/${tombstone.tenantId}/${tombstone.repositoryId}/${tombstone.requestId}`]);
@@ -56,5 +64,6 @@ export class PostgresDeletionWorkflow {
     }));
   }
 }
+function validatePersistedApproval(t:DeletionTombstone,value:DeletionApprovalEvidence):void{if(!value||value.schema!=="agentics.deletion-approval/v1"||value.action!=="repository.delete"||value.irreversible!==true||value.tenantId!==t.tenantId||value.repositoryId!==t.repositoryId||value.requestId!==t.requestId||value.policyEpoch!==t.policyEpoch||!value.approverSubject||!value.signature||!value.keyId)throw new TypeError("PERSISTED_DELETION_APPROVAL_INVALID");const binding={schema:value.schema,decisionId:value.decisionId,evidenceDigest:value.evidenceDigest,policyEpoch:value.policyEpoch,action:value.action,tenantId:value.tenantId,repositoryId:value.repositoryId,requestId:value.requestId,approverSubject:value.approverSubject,expiresAt:value.expiresAt,irreversible:value.irreversible};if(digestBytes(new TextEncoder().encode(canonicalJson(binding)))!==value.decisionDigest)throw new TypeError("PERSISTED_DELETION_APPROVAL_INVALID");}
 function retry<T>(operation: () => Promise<T>): Promise<T> { return withSerializableRetry(() => operation(), { maxAttempts: 20, baseDelayMs: 2, deadlineMs: Date.now() + 20_000 }); }
 function validateResult(value: DeletionResult, category: DeletionCategory, tombstone: DeletionTombstone, operationKey: string): void { if (value.category !== category || value.operationKey !== operationKey || value.tenantId !== tombstone.tenantId || value.repositoryId !== tombstone.repositoryId || value.requestId !== tombstone.requestId || ![value.removed,value.retained,value.held].every((item) => Number.isSafeInteger(item) && item >= 0) || !/^[a-f0-9]{64}$/.test(value.digest) || !/^[a-f0-9]{64}$/.test(value.acknowledgementDigest)) throw new TypeError("DELETION_ACKNOWLEDGEMENT_INVALID"); }
