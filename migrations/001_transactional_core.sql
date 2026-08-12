@@ -1,5 +1,3 @@
-BEGIN;
-
 CREATE TABLE IF NOT EXISTS schema_migrations (
   version integer PRIMARY KEY,
   checksum text NOT NULL CHECK (checksum ~ '^[a-f0-9]{64}$'),
@@ -111,5 +109,3 @@ DO $$ DECLARE table_name text; BEGIN
     EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
   END LOOP;
 END $$;
-
-COMMIT;

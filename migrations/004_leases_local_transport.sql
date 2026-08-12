@@ -1,4 +1,3 @@
-BEGIN;
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS lease_token uuid;
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS lease_owner text;
 ALTER TABLE outbox ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
@@ -27,4 +26,3 @@ ALTER TABLE local_transport_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE local_transport_messages FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON local_transport_messages USING (tenant_id=current_setting('app.tenant_id',true)) WITH CHECK (tenant_id=current_setting('app.tenant_id',true));
 GRANT SELECT,INSERT,UPDATE ON local_transport_messages TO agentics_app;
-COMMIT;
