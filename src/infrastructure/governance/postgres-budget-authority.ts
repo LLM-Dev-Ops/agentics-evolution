@@ -12,14 +12,14 @@ export class PostgresBudgetAuthority implements BudgetAuthorityPort {
     const digest = digestBytes(new TextEncoder().encode(canonicalJson(input)));
     const existing = await withSerializableRetry(() => this.database.tenantTransaction(input.tenantId, "SERIALIZABLE", async client => {
       await client.query(`INSERT INTO budget_reservation_sagas(tenant_id,repository_id,idempotency_key,request_digest,organization_id,estimated_amount,status) VALUES($1,$2,$3,$4,$5,$6,'REQUESTED') ON CONFLICT DO NOTHING`, [input.tenantId,input.repositoryId,input.idempotencyKey,digest,input.organizationId,input.amount]);
-      const row = (await client.query("SELECT request_digest,response,status FROM budget_reservation_sagas WHERE tenant_id=$1 AND repository_id=$2 AND idempotency_key=$3 FOR UPDATE", [input.tenantId,input.repositoryId,input.idempotencyKey])).rows[0]; if (row?.request_digest !== digest) throw new TypeError("BUDGET_IDEMPOTENCY_CONFLICT"); return row; }), { maxAttempts: 8, baseDelayMs: 2, deadlineMs: Date.now() + 10_000 });
+      const row = (await client.query("SELECT request_digest,response,status FROM budget_reservation_sagas WHERE tenant_id=$1 AND repository_id=$2 AND idempotency_key=$3 FOR UPDATE", [input.tenantId,input.repositoryId,input.idempotencyKey])).rows[0]; if (row?.request_digest !== digest) throw new TypeError("BUDGET_IDEMPOTENCY_CONFLICT"); return row; }), { maxAttempts: 32, baseDelayMs: 2, deadlineMs: Date.now() + 30_000 });
     if (existing?.status === "RESERVED") return existing.response as LedgerReservation;
     const reservation = await this.ledger.reserve(input, signal);
     return withSerializableRetry(() => this.database.tenantTransaction(input.tenantId, "SERIALIZABLE", async client => {
       const updated = await client.query(`UPDATE budget_reservation_sagas SET ledger_reservation_id=$4,status='RESERVED',response=$5,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND repository_id=$2 AND idempotency_key=$3 AND status='REQUESTED' RETURNING response`, [input.tenantId,input.repositoryId,input.idempotencyKey,reservation.reservationId,reservation]);
       if (!updated.rowCount) { const row=(await client.query("SELECT response FROM budget_reservation_sagas WHERE tenant_id=$1 AND repository_id=$2 AND idempotency_key=$3",[input.tenantId,input.repositoryId,input.idempotencyKey])).rows[0]; if (row?.response?.reservationId===reservation.reservationId) return row.response as LedgerReservation; throw new TypeError("BUDGET_RESERVATION_RACE"); }
       await this.outbox(client,input,"BudgetReserved",reservation.reservationId,{amount:input.amount,correlationId:input.correlationId}); return reservation;
-    }), { maxAttempts: 8, baseDelayMs: 2, deadlineMs: Date.now() + 10_000 });
+    }), { maxAttempts: 32, baseDelayMs: 2, deadlineMs: Date.now() + 30_000 });
   }
   /** Replays the original key through the upstream authority, then converges local saga state. */
   async reconcile(input: BudgetReservationRequest, signal: AbortSignal): Promise<LedgerReservation> { return this.reserve(input, signal); }
