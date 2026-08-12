@@ -28,7 +28,7 @@ async function cleanRun(parent, iteration) {
   execFileSync("npm", ["ci", "--omit=optional", "--ignore-scripts"], options);
   execFileSync("npm", ["run", "install:platform-artifacts"], options);
   execFileSync("npm", ["run", "build"], options);
-  execFileSync("npm", ["test"], options);
+  execFileSync("npm", ["run", "test:evidence"], options);
   const outputs = await files(root);
   return { iteration, outputDigest: sha256(JSON.stringify(outputs)), outputs };
 }
