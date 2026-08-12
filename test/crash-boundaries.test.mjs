@@ -3,14 +3,18 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { generateKeyPairSync, sign } from "node:crypto";
 import pg from "pg";
-import { canonicalJson, consumeOnce, OutboxRelay, PostgresPersistence, ReplayCapabilityVerifier } from "../dist/index.js";
+import { canonicalJson, consumeOnce, OutboxRelay, PostgresLocalTransport, PostgresPersistence, ReplayCapabilityVerifier } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
 const worker = new URL("fixtures/postgres-crash-worker.mjs", import.meta.url).pathname;
+const relayWorker = new URL("fixtures/relay-crash-worker.mjs", import.meta.url).pathname;
 const databaseConfig = { connectionString: url, maxConnections: 4, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000, enforceRuntimeRole: false };
 
 async function killAt(stage, marker, tenant, eventId) {
-  const child = spawn(process.execPath, [worker, stage, tenant, eventId], { env: { ...process.env, TEST_DATABASE_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
+  return killProcessAt(worker, [stage, tenant, eventId], marker);
+}
+async function killProcessAt(script, args, marker) {
+  const child = spawn(process.execPath, [script, ...args], { env: { ...process.env, TEST_DATABASE_URL: url }, stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => {
     let output = ""; let errors = ""; child.stdout.on("data", (data) => { output += data; if (output.includes(marker)) resolve(); });
     child.stderr.on("data", (data) => { errors += data; }); child.on("error", reject);
@@ -92,4 +96,18 @@ test("terminal publish failure is attributable and requires authorization to red
     const audited = await database.pool.query("SELECT redrive_count,redriven_at FROM dead_letters WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
     assert.equal(audited.rows[0].redrive_count, 1); assert.ok(audited.rows[0].redriven_at);
   } finally { await database.close(); }
+});
+
+test("killed relay reclaims leases and durable broker acceptance remains one logical message", { skip: !url }, async () => {
+  for (const [index, stage, marker] of [[31, "after-claim", "CLAIMED"], [32, "after-broker", "BROKER_ACCEPTED"]]) {
+    const tenant = `relay-${stage}-${runId}`; const eventId = `0198a41d-2c00-7000-8000-${String(index).padStart(12, "0")}`;
+    await killAt("after-commit", "COMMITTED", tenant, eventId); await killProcessAt(relayWorker, [stage, tenant], marker);
+    const database = new PostgresPersistence(databaseConfig); const transport = new PostgresLocalTransport(database); const relay = new OutboxRelay(database, transport);
+    try {
+      await database.pool.query("UPDATE outbox SET lease_expires_at=transaction_timestamp()-interval '1 second',next_attempt_at=transaction_timestamp() WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+      assert.equal(await relay.drain(tenant), 1);
+      const broker = await database.pool.query("SELECT count(*)::int AS count FROM local_transport_messages WHERE tenant_id=$1 AND event_id=$2", [tenant, eventId]);
+      assert.equal(broker.rows[0].count, 1, "broker dedupe preserves one logical message across relay death");
+    } finally { await database.close(); }
+  }
 });
