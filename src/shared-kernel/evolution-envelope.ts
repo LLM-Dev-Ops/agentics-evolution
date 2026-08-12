@@ -1,8 +1,8 @@
-import { AggregateId, ActorId, CycleId, RepositoryId, TenantId } from "./identity.js";
-import { DigestReference, digestBytes } from "./digest.js";
-import { SourceSnapshot } from "./source-snapshot.js";
-import { UtcInstant } from "./time.js";
-import { CausationId, CorrelationId, EventId, IdempotencyKey } from "./uuid-v7.js";
+import { AggregateId, ActorId, CycleId, RepositoryId, TenantId, actorId, aggregateId, cycleId, repositoryId, tenantId } from "./identity.js";
+import { DigestReference, digestBytes, digestReference } from "./digest.js";
+import { SourceSnapshot, sourceSnapshot } from "./source-snapshot.js";
+import { UtcInstant, utcInstant } from "./time.js";
+import { CausationId, CorrelationId, EventId, IdempotencyKey, causationId, correlationId, eventId, idempotencyKey } from "./uuid-v7.js";
 import { canonicalJson, deepFreeze } from "./immutable.js";
 export const ENVELOPE_SCHEMA = "agentics.evolution-envelope/v1" as const;
 export interface EvolutionEnvelope<P extends Record<string, unknown> = Record<string, unknown>> {
@@ -18,6 +18,10 @@ export function createEnvelope<P extends Record<string, unknown>>(input: Evoluti
   if (input.envelopeSchema !== ENVELOPE_SCHEMA || input.schemaVersion !== 1) throw new TypeError("unknown envelope schema version");
   if (!/^[A-Z][A-Za-z0-9]*(?:ed|Generated|Proposed|Accepted|Authorized|Revoked|RolledBack)$/.test(input.type)) throw new TypeError("domain event type must be past tense");
   if (!Number.isSafeInteger(input.policyEpoch) || input.policyEpoch < 0) throw new TypeError("policyEpoch must be non-negative");
+  eventId(input.id); tenantId(input.tenantId); repositoryId(input.repositoryId); aggregateId(input.aggregateId); cycleId(input.cycleId); actorId(input.actorId);
+  utcInstant(input.occurredAt); causationId(input.causationId); correlationId(input.correlationId); idempotencyKey(input.idempotencyKey);
+  sourceSnapshot(input.sourceRef);
+  for (const reference of input.evidence) digestReference(reference);
   canonicalJson(input.payload);
   return deepFreeze(structuredClone(input)) as Readonly<EvolutionEnvelope<P>>;
 }

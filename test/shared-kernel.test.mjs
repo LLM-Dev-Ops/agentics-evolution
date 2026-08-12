@@ -12,12 +12,14 @@ const evidenceBytes = new TextEncoder().encode("verified upstream evidence");
 const evidenceSha = digestBytes(evidenceBytes);
 const evidence = digestReference({ uri: `cas://sha256/${evidenceSha}`, sha256: evidenceSha });
 const events = ["HypothesisProposed", "CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"];
+const authorities = ["Dream", "Darwin", "Flywheel", "Governance"];
+const resolveEvidence = () => evidenceBytes;
 function envelope(type, index, overrides = {}) {
   return createEnvelope({ envelopeSchema: "agentics.evolution-envelope/v1", schemaVersion: 1,
     id: newEventId(), type, ...identity, cycleId: cycleId("cycle-a"), actorId: actorId("actor-a"),
     occurredAt: utcInstant(`2026-08-12T00:00:0${index}.000Z`), causationId: newCausationId(), correlationId: newCorrelationId(),
     idempotencyKey: newIdempotencyKey(), policyEpoch: 1, sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
-    evidence: [evidence], payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId, step: index }, ...overrides });
+    evidence: [evidence], payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId, authority: authorities[index] ?? "Dream", step: index }, ...overrides });
 }
 
 test("UUIDv7 identifiers validate version, variant, uniqueness, and lexical time order", () => {
@@ -52,13 +54,15 @@ test("trust transition property exhaustively permits only the four evidenced edg
 
 test("complete vertical event history replays deterministically and authorizes only last", () => {
   const history = events.map((type, index) => envelope(type, index));
-  const first = replayTrust(identity, history);
-  const second = replayTrust(identity, history);
+  const first = replayTrust(identity, history, resolveEvidence);
+  const second = replayTrust(identity, history, resolveEvidence);
   assert.equal(first.state, "AUTHORIZED"); assert.equal(first.version, 4); assert.deepEqual(first, second);
-  assert.equal(replayTrust(identity, history.slice(0, 3)).state, "PROVED");
-  assert.throws(() => replayTrust(identity, [history[0], history[2]]), /illegal/);
-  assert.throws(() => replayTrust(identity, [envelope("HypothesisProposed", 0, { tenantId: tenantId("tenant-b") })]), /foreign/);
-  const duplicate = replayTrust(identity, [history[0], history[0]]); assert.equal(duplicate.version, 1);
+  assert.equal(replayTrust(identity, history.slice(0, 3), resolveEvidence).state, "PROVED");
+  assert.throws(() => replayTrust(identity, [history[0], history[2]], resolveEvidence), /illegal/);
+  assert.throws(() => replayTrust(identity, [envelope("HypothesisProposed", 0, { tenantId: tenantId("tenant-b") })], resolveEvidence), /foreign/);
+  assert.throws(() => replayTrust(identity, history, () => new TextEncoder().encode("tampered")), /verification failed/);
+  assert.throws(() => replayTrust(identity, [envelope("CandidateGenerated", 1, { payload: { authority: "Dream" } })], resolveEvidence));
+  const duplicate = replayTrust(identity, [history[0], history[0]], resolveEvidence); assert.equal(duplicate.version, 1);
 });
 
 test("envelope is canonical, immutable, closed, registered, and tamper evident", () => {
@@ -76,8 +80,8 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
 test("same idempotency key remains tenant scoped", () => {
   const key = idempotencyKey(newIdempotencyKey());
   const first = envelope("HypothesisProposed", 0, { idempotencyKey: key });
-  assert.equal(replayTrust(identity, [first, first]).version, 1);
+  assert.equal(replayTrust(identity, [first, first], resolveEvidence).version, 1);
   const other = { tenantId: tenantId("tenant-b"), repositoryId: repositoryId("repo-a"), aggregateId: aggregateId("aggregate-a") };
   const second = envelope("HypothesisProposed", 0, { ...other, idempotencyKey: key, correlationId: correlationId(newCorrelationId()) });
-  assert.equal(replayTrust(other, [second]).version, 1);
+  assert.equal(replayTrust(other, [second], resolveEvidence).version, 1);
 });
