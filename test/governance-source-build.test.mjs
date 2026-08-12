@@ -15,6 +15,10 @@ test("exact governance sources verify trees, build when dependency-complete, and
   const validation = await import(join(dirname(ledger.artifact), "validation/index.js"));
   assert.equal(validation.validatePositiveAmount("10.25", "amount"), "10.250000");
   assert.throws(() => validation.validatePositiveAmount("-1", "amount"));
-  const policy = evidence.authorities.find(({ name }) => name === "agentics-policy-engine"); assert.equal(policy.status, "SOURCE_LOCKFILE_MISSING");
+  const policy = evidence.authorities.find(({ name }) => name === "agentics-policy-engine"); assert.equal(policy.status, "BUILT");
+  const { PolicyEngine } = await import(join(dirname(policy.artifact), "core/engine/policy-engine.js"));
+  const engine = new PolicyEngine([{ metadata:{id:"deny",name:"deny",version:"1",namespace:"test",priority:100},status:"active",rules:[{id:"r",name:"deny writes",enabled:true,condition:{operator:"eq",field:"metadata.action",value:"repository.write"},action:{decision:"deny",reason:"blocked"}}] }]);
+  const policyResult = await engine.evaluate({ requestId:"contract",context:{metadata:{action:"repository.write"}},trace:true });
+  assert.equal(policyResult.decision.allowed,false); assert.equal(policyResult.decision.decision,"deny");
   const enforcement = evidence.authorities.find(({ name }) => name === "agentics-enforcement"); assert.equal(enforcement.status, "BUILD_DEPENDENCY_UNAVAILABLE");
 });

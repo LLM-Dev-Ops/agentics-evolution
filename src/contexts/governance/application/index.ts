@@ -5,6 +5,7 @@ export * from "./authority-evidence.js";
 export * from "./trust-aggregate.js";
 export * from "./upstream-authority-ports.js";
 export * from "./budget-authority.js";
+export * from "./policy-decision-service.js";
 export * from "./identity.js";
 export * from "./privacy-boundaries.js";
 export * from "./privacy-scanner.js";

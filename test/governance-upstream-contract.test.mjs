@@ -12,8 +12,8 @@ const CAPABILITY_TEST_IDS = ["policy.evaluate.behavior", "policy.deny.behavior",
   "enforcement.rules.behavior", "enforcement.outage.behavior", "ledger.reserve.behavior", "ledger.consume.behavior", "ledger.cancel.behavior", "ledger.idempotency.behavior"];
 assert.equal(CAPABILITY_TEST_IDS.length, 10);
 const pins = [
-  ["policy-engine", "d47b632f10a6475cb315fabcf5cb4b8830a60276"],
-  ["agentics-enforcement", "52d8bfe7f72647503bc9ec2915daa78a471e2496"],
+  ["policy-engine", "c44b699eadc6b8dbbd26fa35d7cf82d61275979b"],
+  ["agentics-enforcement", "90f1b063606d1bb0f53d77a712ad71cf7870c9ff"],
   ["agentics-usage-ledger", "4ab9d188cf566bba54acaa997e3df221ed4656a8"]
 ];
 test("policy.evaluate.behavior enforcement.schema.behavior ledger.reserve.behavior: source authorities are exact", async () => {
@@ -38,4 +38,7 @@ test("enforcement.rules.behavior enforcement.outage.behavior ledger.consume.beha
   assert.equal((await ledger.reserve({ organizationId: "org", amount: "10", ttlSeconds: 60, idempotencyKey: crypto.randomUUID(), actor: "a", correlationId: "c" }, new AbortController().signal)).reservationId, "r1");
   assert.equal(seen[0][1], "Bearer identity-token");
   await assert.rejects(new UsageLedgerHttpAdapter(new URL("http://x"), async () => "").reserve({ organizationId: "org", amount: "1", ttlSeconds: 1, idempotencyKey: crypto.randomUUID(), actor: "a", correlationId: "c" }, new AbortController().signal), /IDENTITY_UNAVAILABLE/);
+  assert.throws(()=>ledger.reserve({ organizationId:"org",amount:"-1",ttlSeconds:60,idempotencyKey:crypto.randomUUID(),actor:"a",correlationId:"c" },new AbortController().signal),/LEDGER_AMOUNT_INVALID/);
+  assert.throws(()=>ledger.reserve({ organizationId:"org",amount:"1",ttlSeconds:0,idempotencyKey:crypto.randomUUID(),actor:"a",correlationId:"c" },new AbortController().signal),/LEDGER_TTL_INVALID/);
+  assert.throws(()=>ledger.reserve({ organizationId:"org",amount:"1",ttlSeconds:60,idempotencyKey:"not-uuid",actor:"a",correlationId:"c" },new AbortController().signal),/LEDGER_IDEMPOTENCY_KEY_INVALID/);
 });

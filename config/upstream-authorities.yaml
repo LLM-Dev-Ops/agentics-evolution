@@ -131,8 +131,8 @@ authorities:
 sourceAuthorities:
   - name: agentics-policy-engine
     repository: https://github.com/LLM-Dev-Ops/policy-engine.git
-    commit: d47b632f10a6475cb315fabcf5cb4b8830a60276
-    sourceTree: 863246845da7fdcf0c758f57fb8bf929812dd440
+    commit: c44b699eadc6b8dbbd26fa35d7cf82d61275979b
+    sourceTree: f7b33bac2ada85602ac8afee5bc69edab3a909f6
     path: .
     build: npm ci --ignore-scripts && npm run build
     binary: dist/index.js
@@ -143,8 +143,8 @@ sourceAuthorities:
     deviations: []
   - name: agentics-enforcement
     repository: https://github.com/LLM-Dev-Ops/agentics-enforcement.git
-    commit: 52d8bfe7f72647503bc9ec2915daa78a471e2496
-    sourceTree: 60df0edac7a716751bfccd2ed83fd4e1678c80c1
+    commit: 90f1b063606d1bb0f53d77a712ad71cf7870c9ff
+    sourceTree: 6096b6d98189fc32259fe9a844924c7c7215fb75
     path: .
     build: npm ci --ignore-scripts && npm run build
     binary: dist/index.js
