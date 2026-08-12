@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { verifyReceipt } from "@metaharness/flywheel";
 import { actorId, digestBytes, digestReference, repositoryId, sourceSnapshot, tenantId } from "../dist/index.js";
 import { stagedManifest, canonicalManifestBytes, sealedManifest } from "../dist/contexts/artifact-lineage/domain/artifact-manifest.js";
-import { artifactReadGrant } from "../dist/contexts/artifact-lineage/application/cas-port.js";
+import { HmacArtifactAccessAuthority } from "../dist/infrastructure/artifact-lineage/hmac-artifact-access.js";
 import { LocalContentAddressedStorage } from "../dist/contexts/artifact-lineage/infrastructure/local-cas.js";
 import { LocalFlywheelSigner } from "../dist/infrastructure/upstream-flywheel/artifact-signer.js";
 import { ArtifactLineageStore } from "../dist/infrastructure/artifact-lineage/lineage-store.js";
@@ -16,14 +16,16 @@ import { PostgresPersistence } from "../dist/index.js";
 const reference = (bytes) => { const sha256 = digestBytes(bytes); return digestReference({ uri: `cas://sha256/${sha256}`, sha256 }); };
 const metadata = (tenant = "tenant-a") => ({ tenantId: tenantId(tenant), repositoryId: repositoryId("repo-a"), mediaType: "application/octet-stream",
   classification: "CONFIDENTIAL", retention: "EVALUATION_EVIDENCE", legalHold: false });
+const access = new HmacArtifactAccessAuthority(Buffer.alloc(32, 9));
+const grant = (tenant, repo = "repo-a") => access.issueRead({ tenantId: tenantId(tenant), repositoryId: repositoryId(repo), expiresAt: new Date(Date.now() + 60_000).toISOString() });
 
 test("local CAS stages, atomically finalizes, deduplicates and isolates tenants", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agentics-cas-")); const cas = new LocalContentAddressedStorage(root, 1024); const bytes = new TextEncoder().encode("artifact"); const expected = reference(bytes);
+  const root = await mkdtemp(join(tmpdir(), "agentics-cas-")); const cas = new LocalContentAddressedStorage(root, 1024, access); const bytes = new TextEncoder().encode("artifact"); const expected = reference(bytes);
   try {
     await assert.rejects(cas.stage(bytes, reference(new TextEncoder().encode("other")), metadata()), /DIGEST_MISMATCH/);
-    const staged = await cas.stage(bytes, expected, metadata()); await cas.finalize(staged); assert.deepEqual([...await cas.read(expected, artifactReadGrant(tenantId("tenant-a"), repositoryId("repo-a")))], [...bytes]);
-    await assert.rejects(cas.read(expected, artifactReadGrant(tenantId("tenant-b"), repositoryId("repo-a"))), /NOT_FOUND/);
-    const duplicate = await cas.stage(bytes, expected, metadata()); await cas.finalize(duplicate); assert.deepEqual([...await cas.read(expected, artifactReadGrant(tenantId("tenant-a"), repositoryId("repo-a")))], [...bytes]);
+    const staged = await cas.stage(bytes, expected, metadata()); await cas.finalize(staged); assert.deepEqual([...await cas.read(expected, grant("tenant-a"))], [...bytes]);
+    await assert.rejects(cas.read(expected, grant("tenant-b")), /NOT_FOUND/);
+    const duplicate = await cas.stage(bytes, expected, metadata()); await cas.finalize(duplicate); assert.deepEqual([...await cas.read(expected, grant("tenant-a"))], [...bytes]);
     const tampered = await cas.stage(bytes, expected, metadata()); await writeFile(join(root, "staging", tampered.stageId), "tampered");
     await assert.rejects(cas.finalize(tampered), /TAMPERED/);
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -44,11 +46,11 @@ test("ordered manifest digest and exact Flywheel signer remain upstream compatib
 });
 
 test("PostgreSQL lineage seals dependencies, audits holds and fences garbage collection", { skip: !process.env.TEST_DATABASE_URL }, async () => {
-  const root = await mkdtemp(join(tmpdir(), "agentics-lineage-")); const cas = new LocalContentAddressedStorage(root); const tenant = tenantId(`artifact-${process.pid}-${Date.now()}`);
+  const root = await mkdtemp(join(tmpdir(), "agentics-lineage-")); const cas = new LocalContentAddressedStorage(root, undefined, access); const tenant = tenantId(`artifact-${process.pid}-${Date.now()}`);
   const database = new PostgresPersistence({ connectionString: process.env.TEST_DATABASE_URL, maxConnections: 8, statementTimeoutMs: 5_000, lockTimeoutMs: 1_000, enforceRuntimeRole: false });
   let holdAction = "PLACE"; let nonce = 0; const holdVerifier = { verify: async () => ({ tenantId: tenant, manifestDigest: orphan?.manifestDigest.sha256 ?? "", action: holdAction,
     actor: "governance", expiresAt: new Date(Date.now() + 60_000).toISOString(), nonce: `hold-${++nonce}` }) };
-  const lineage = new ArtifactLineageStore(database, cas, holdVerifier); let orphan; const create = async (label, dependencies = []) => {
+  const lineage = new ArtifactLineageStore(database, cas, access, holdVerifier); let orphan; const create = async (label, dependencies = []) => {
     const bytes = new TextEncoder().encode(label); const artifact = reference(bytes); const staged = await cas.stage(bytes, artifact, metadata(tenant)); await cas.finalize(staged);
     const payload = { schema: "agentics.artifact-manifest/v1", tenantId: tenant, repositoryId: repositoryId("repo-a"), artifact,
       mediaType: "application/octet-stream", size: bytes.byteLength, producer: actorId("producer-a"), source: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),

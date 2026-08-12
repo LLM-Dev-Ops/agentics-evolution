@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Bucket } from "@google-cloud/storage";
 import { digestBytes, digestReference, type DigestReference } from "../../shared-kernel/digest.js";
-import type { ArtifactDeleteToken, ArtifactReadGrant, ArtifactWriteMetadata, ContentAddressedStoragePort, StagedArtifact } from "../../contexts/artifact-lineage/application/cas-port.js";
+import type { ArtifactAccessVerifier, ArtifactDeleteToken, ArtifactReadGrant, ArtifactWriteMetadata, ContentAddressedStoragePort, StagedArtifact } from "../../contexts/artifact-lineage/application/cas-port.js";
 
 export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
-  constructor(readonly bucket: Bucket, readonly prefix = "cas", readonly maximumBytes = 256 * 1024 * 1024) {}
+  constructor(readonly bucket: Bucket, readonly access: ArtifactAccessVerifier, readonly prefix = "cas", readonly maximumBytes = 256 * 1024 * 1024) {}
   async stage(bytes: Uint8Array, expected: DigestReference, metadata: ArtifactWriteMetadata): Promise<StagedArtifact> {
     return this.stageStream((async function* () { yield bytes; })(), expected, bytes.byteLength, metadata);
   }
@@ -22,28 +22,30 @@ export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
     return Object.freeze({ stageId, expected, size, metadata });
   }
   async finalize(staged: StagedArtifact): Promise<DigestReference> {
-    const source = this.bucket.file(`${this.prefix}/staging/${staged.stageId}`); const [bytes] = await source.download();
-    if (bytes.byteLength !== staged.size || digestBytes(bytes) !== staged.expected.sha256) throw new TypeError("STAGED_ARTIFACT_TAMPERED");
+    const source = this.bucket.file(`${this.prefix}/staging/${staged.stageId}`); await assertFileDigest(source, staged.size, staged.expected.sha256, "STAGED_ARTIFACT_TAMPERED");
     const destination = this.bucket.file(this.finalName(staged.expected));
     try {
-      await destination.save(bytes, { resumable: false, preconditionOpts: { ifGenerationMatch: 0 }, metadata: { contentType: staged.metadata.mediaType,
-        metadata: encodeMetadata({ ...staged.metadata, sha256: staged.expected.sha256, size: String(staged.size) }) } });
+      await source.copy(destination, { preconditionOpts: { ifGenerationMatch: 0 } });
+      await destination.setMetadata({ contentType: staged.metadata.mediaType, metadata: encodeMetadata({ ...staged.metadata, sha256: staged.expected.sha256, size: String(staged.size) }) });
     } catch (error) {
       if ((error as { code?: number }).code !== 412) throw error;
-      const [existing] = await destination.download(); if (existing.byteLength !== staged.size || digestBytes(existing) !== staged.expected.sha256) throw new TypeError("CAS_COLLISION");
+      await assertFileDigest(destination, staged.size, staged.expected.sha256, "CAS_COLLISION");
     }
     await source.delete({ ignoreNotFound: true }); return staged.expected;
   }
   async read(reference: DigestReference, grant: ArtifactReadGrant): Promise<Uint8Array> {
-    digestReference(reference); const file = this.bucket.file(this.finalName(reference)); const [metadata] = await file.getMetadata();
-    if (metadata.metadata?.tenantId !== grant.tenantId || metadata.metadata?.repositoryId !== grant.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND"); const [bytes] = await file.download();
+    const verified = await this.access.verifyRead(grant); digestReference(reference); const file = this.bucket.file(this.finalName(reference)); const [metadata] = await file.getMetadata();
+    if (metadata.metadata?.tenantId !== verified.tenantId || metadata.metadata?.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND"); const [bytes] = await file.download();
     if (digestBytes(bytes) !== reference.sha256) throw new TypeError("CAS_OBJECT_TAMPERED"); return bytes;
   }
   async exists(reference: DigestReference): Promise<boolean> { return (await this.bucket.file(this.finalName(reference)).exists())[0]; }
   async delete(reference: DigestReference, token: ArtifactDeleteToken): Promise<void> {
-    if (token.digest !== reference.sha256 || Date.parse(token.expiresAt) <= Date.now() || token.fencingToken < 1) throw new TypeError("INVALID_DELETE_TOKEN");
-    const file = this.bucket.file(this.finalName(reference)); const [metadata] = await file.getMetadata();
-    if (metadata.metadata?.tenantId !== token.tenantId || metadata.metadata?.repositoryId !== token.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND");
+    const verified = await this.access.verifyDelete(token); if (verified.digest !== reference.sha256) throw new TypeError("INVALID_DELETE_TOKEN");
+    const file = this.bucket.file(this.finalName(reference)); const [metadata] = await file.getMetadata().catch((error: { code?: number }) => {
+      if (error.code === 404) return [{ metadata: {}, generation: undefined }] as never; throw error;
+    });
+    if (!metadata.generation) return;
+    if (metadata.metadata?.tenantId !== verified.tenantId || metadata.metadata?.repositoryId !== verified.repositoryId) throw new TypeError("ARTIFACT_NOT_FOUND");
     await file.delete({ ifGenerationMatch: Number(metadata.generation) });
   }
   async readiness(): Promise<void> {
@@ -53,6 +55,11 @@ export class GcsContentAddressedStorage implements ContentAddressedStoragePort {
     if (!metadata.versioning?.enabled) throw new TypeError("GCS_BUCKET_VERSIONING_REQUIRED");
   }
   private finalName(reference: DigestReference): string { return `${this.prefix}/sha256/${reference.sha256.slice(0, 2)}/${reference.sha256}`; }
+}
+async function assertFileDigest(file: ReturnType<Bucket["file"]>, expectedSize: number, expectedDigest: string, failure: string): Promise<void> {
+  const hash = createHash("sha256"); let size = 0;
+  for await (const chunk of file.createReadStream()) { const bytes = chunk as Buffer; size += bytes.byteLength; hash.update(bytes); }
+  if (size !== expectedSize || hash.digest("hex") !== expectedDigest) throw new TypeError(failure);
 }
 function encodeMetadata(value: Record<string, unknown>): Record<string, string> {
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, typeof item === "string" ? item : JSON.stringify(item)]));

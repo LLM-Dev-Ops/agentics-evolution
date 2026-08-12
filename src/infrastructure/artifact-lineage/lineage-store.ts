@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type pg from "pg";
 import type { PostgresPersistence } from "../../persistence/postgres.js";
 import type { ContentAddressedStoragePort } from "../../contexts/artifact-lineage/application/cas-port.js";
-import { artifactDeleteToken, artifactReadGrant } from "../../contexts/artifact-lineage/application/cas-port.js";
+import type { ArtifactAccessAuthority } from "../../contexts/artifact-lineage/application/cas-port.js";
 import type { LegalHoldAuthorization, LegalHoldAuthorizationVerifier } from "../../contexts/artifact-lineage/application/legal-hold-authorization.js";
 import type { ArtifactManifest } from "../../contexts/artifact-lineage/domain/artifact-manifest.js";
 import { repositoryId as parseRepositoryId, tenantId as parseTenantId } from "../../shared-kernel/identity.js";
@@ -10,7 +10,7 @@ import { digestReference } from "../../shared-kernel/digest.js";
 
 const MINIMUM_RETENTION_DAYS = { OPERATIONAL_SCRATCH: 7, CANDIDATE_ARCHIVE: 30, EVALUATION_EVIDENCE: 365, AUTHORIZATION_AUDIT: 2555, LEGAL_HOLD: 36500 } as const;
 export class ArtifactLineageStore {
-  constructor(readonly database: PostgresPersistence, readonly cas: ContentAddressedStoragePort, readonly holdVerifier?: LegalHoldAuthorizationVerifier) {}
+  constructor(readonly database: PostgresPersistence, readonly cas: ContentAddressedStoragePort, readonly access: ArtifactAccessAuthority, readonly holdVerifier?: LegalHoldAuthorizationVerifier) {}
   async stage(manifest: ArtifactManifest): Promise<void> {
     if (manifest.status !== "STAGED") throw new TypeError("STAGED_MANIFEST_REQUIRED"); const payload = manifest.payload;
     await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
@@ -21,12 +21,14 @@ export class ArtifactLineageStore {
         VALUES($1,$2,$3,$4,$5,'STAGED',$6,$7)`, [payload.tenantId, payload.repositoryId, manifest.manifestDigest.sha256, payload.artifact.sha256, payload, retainUntil, payload.retention === "LEGAL_HOLD"]);
       for (const [ordinal, dependency] of payload.dependencies.entries()) await client.query(`INSERT INTO artifact_dependencies(tenant_id,manifest_digest,ordinal,dependency_digest,role)
         VALUES($1,$2,$3,$4,$5)`, [payload.tenantId, manifest.manifestDigest.sha256, ordinal, dependency.digest.sha256, dependency.role]);
+      await client.query(`INSERT INTO artifact_digest_references(tenant_id,repository_id,artifact_digest,manifest_digest) VALUES($1,$2,$3,$4)`,
+        [payload.tenantId, payload.repositoryId, payload.artifact.sha256, manifest.manifestDigest.sha256]);
       await statusEvent(client, payload.tenantId, manifest.manifestDigest.sha256, 0, "STAGED", "manifest staged", payload.producer);
     });
   }
   async seal(manifest: ArtifactManifest): Promise<void> {
     if (manifest.status !== "SEALED" || !manifest.keyId || !manifest.signature) throw new TypeError("SEALED_MANIFEST_REQUIRED"); const payload = manifest.payload;
-    const grant = artifactReadGrant(payload.tenantId, payload.repositoryId);
+    const grant = this.access.issueRead({ tenantId: payload.tenantId, repositoryId: payload.repositoryId, expiresAt: new Date(Date.now() + 60_000).toISOString() });
     if (!await this.cas.exists(payload.artifact)) throw new TypeError("PRIMARY_ARTIFACT_MISSING"); await this.cas.read(payload.artifact, grant);
     await this.database.tenantTransaction(payload.tenantId, "SERIALIZABLE", async (client) => {
       for (const dependency of payload.dependencies) {
@@ -74,7 +76,9 @@ export class ArtifactLineageStore {
     for (const candidate of candidates) {
       const intent = await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
       const guarded = await client.query(`SELECT artifact_digest,version,repository_id FROM artifact_manifests WHERE tenant_id=$1 AND manifest_digest=$2 AND version=$3
-        AND status IN ('REVOKED','EXPIRED') AND legal_hold=false AND retain_until<$4 FOR UPDATE`, [tenantId, candidate.manifest_digest, candidate.version, now]);
+        AND status IN ('REVOKED','EXPIRED') AND legal_hold=false AND retain_until<$4
+        AND NOT EXISTS (SELECT 1 FROM artifact_digest_references r WHERE r.artifact_digest=artifact_manifests.artifact_digest AND r.live AND r.manifest_digest<>artifact_manifests.manifest_digest)
+        FOR UPDATE`, [tenantId, candidate.manifest_digest, candidate.version, now]);
       if (!guarded.rowCount) return undefined; const intentId = randomUUID(); const expiresAt = new Date(Date.now() + 60_000).toISOString();
       const fenced = await client.query(`UPDATE artifact_gc_candidates SET intent_id=$4,intent_fence=intent_fence+1,intent_expires_at=$5
         WHERE tenant_id=$1 AND run_id=$2 AND manifest_digest=$3 RETURNING intent_fence`, [tenantId, runId, candidate.manifest_digest, intentId, expiresAt]);
@@ -82,11 +86,12 @@ export class ArtifactLineageStore {
         intentId, expiresAt, fencingToken: Number(fenced.rows[0].intent_fence) };
       });
       if (!intent) continue; const ref = digestReference({ uri: `cas://sha256/${intent.digest}`, sha256: intent.digest });
-      await this.cas.delete(ref, artifactDeleteToken({ tenantId: parseTenantId(tenantId), repositoryId: parseRepositoryId(intent.repositoryId), digest: intent.digest, intentId: intent.intentId, expiresAt: intent.expiresAt, fencingToken: intent.fencingToken }));
+      await this.cas.delete(ref, this.access.issueDelete({ tenantId: parseTenantId(tenantId), repositoryId: parseRepositoryId(intent.repositoryId), digest: intent.digest, intentId: intent.intentId, expiresAt: intent.expiresAt, fencingToken: intent.fencingToken }));
       await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
         const result = await client.query(`UPDATE artifact_manifests SET version=version+1,updated_at=transaction_timestamp() WHERE tenant_id=$1 AND manifest_digest=$2
           AND version=$3 AND legal_hold=false RETURNING version`, [tenantId, candidate.manifest_digest, candidate.version]);
         if (!result.rowCount) throw new TypeError("GC_DELETE_INTENT_STALE");
+        await client.query("UPDATE artifact_digest_references SET live=false,released_at=transaction_timestamp() WHERE tenant_id=$1 AND manifest_digest=$2", [tenantId, candidate.manifest_digest]);
         await client.query("UPDATE artifact_gc_candidates SET deleted_at=transaction_timestamp() WHERE tenant_id=$1 AND run_id=$2 AND manifest_digest=$3 AND intent_id=$4", [tenantId, runId, candidate.manifest_digest, intent.intentId]);
         await statusEvent(client, tenantId, candidate.manifest_digest, Number(result.rows[0].version), "DELETED", "unreachable retention-expired artifact swept", actor); swept++;
       });
