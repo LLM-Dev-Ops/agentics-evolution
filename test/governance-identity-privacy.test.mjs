@@ -4,9 +4,9 @@ import test from "node:test";
 import { tenantId, repositoryId } from "../dist/index.js";
 import { CryptographicOidcIdentityVerifier } from "../dist/infrastructure/governance/oidc-identity-verifier.js";
 import { Ed25519DeletionReceiptSigner, Ed25519DeletionReceiptVerifier } from "../dist/infrastructure/governance/ed25519-deletion-receipts.js";
-import { AuthorizationMiddleware } from "../dist/contexts/governance/application/identity.js";
+import { GovernanceEnforcementMiddleware } from "../dist/contexts/governance/application/enforcement-middleware.js";
 import { DeletionCoordinator, deletionTombstone } from "../dist/contexts/governance/application/privacy-boundaries.js";
-import { privacySafeLog, tenantCacheKey, tenantKeyAlias, tenantMetricLabel, tenantVectorNamespace } from "../dist/contexts/governance/application/tenant-boundaries.js";
+import { privacySafeLog, tenantMetricLabel, TenantBoundaryIssuer } from "../dist/contexts/governance/application/tenant-boundaries.js";
 import { retentionDays, retentionExpiresAt, tenantSecurityProfile } from "../dist/contexts/governance/domain/privacy.js";
 import { assertNoClassificationDowngrade, authorizeProvider, effectiveClassification } from "../dist/contexts/governance/domain/provider-policy.js";
 
@@ -36,25 +36,26 @@ test("cryptographic OIDC verifies human MFA and server-side service mappings", a
 
 test("authentication cannot grant capability and middleware delegates exactly once to Governance", async () => {
   const verifier = new CryptographicOidcIdentityVerifier([trust], () => now * 1000); let calls = 0;
-  const governance = { decide: async request => { calls++; assert.equal(request.identity.subject, "alice"); return { allowed: true, decisionDigest: "a".repeat(64), reason: "policy allow" }; } };
-  const middleware = new AuthorizationMiddleware(verifier, governance); const request = { tenantId: tenantId("tenant-a"), repositoryId: repositoryId("repo-a"), action: "cycle.read", correlationId: "corr-1" };
+  const governance = { decide: async request => { calls++; assert.equal(request.identity.subject, "alice"); return { schema:"agentics.governance-decision/v1",allowed:true,action:request.action,tenantId:request.tenantId,repositoryId:request.repositoryId,policyEpoch:request.policyEpoch,decisionDigest:"a".repeat(64),evidenceDigest:"b".repeat(64),reason:"policy allow" }; } };
+  const middleware = new GovernanceEnforcementMiddleware(verifier, governance,{append:async()=>{}}); const request = { tenantId: tenantId("tenant-a"), repositoryId: repositoryId("repo-a"), action: "cycle.read",policyEpoch:"epoch-1", correlationId: "corr-1" };
   const result = await middleware.authorize(jwt(base), request, audience); assert.equal(result.decision.allowed, true); assert.equal(calls, 1); assert.equal("capability" in result.identity, false);
   await assert.rejects(middleware.authorize(jwt(base), { ...request, tenantId: tenantId("tenant-b") }, audience), /TENANT_SCOPE/); assert.equal(calls, 1);
-  const denied = new AuthorizationMiddleware(verifier, { decide: async () => ({ allowed: false, decisionDigest: "b".repeat(64), reason: "deny" }) });
+  const denied = new GovernanceEnforcementMiddleware(verifier, { decide: async value => ({schema:"agentics.governance-decision/v1",allowed:false,action:value.action,tenantId:value.tenantId,repositoryId:value.repositoryId,policyEpoch:value.policyEpoch,decisionDigest:"b".repeat(64),evidenceDigest:"c".repeat(64),reason:"deny"})},{append:async()=>{}});
   await assert.rejects(denied.authorize(jwt(base), request, audience), /AUTHORIZATION_DENIED/);
 });
 
-test("classification, provider, residency and namespace helpers fail closed", () => {
+test("classification, provider, residency and guarded namespace helpers fail closed", async () => {
   const profile = tenantSecurityProfile({ tenantId: "tenant-a", region: "us-central1", maximumClassification: "RESTRICTED", providers: ["private-a"], trainingOptOut: true, retention: { ...retentionDays } });
   assert.equal(effectiveClassification(["PUBLIC", "RESTRICTED", "INTERNAL"]), "RESTRICTED"); assert.throws(() => assertNoClassificationDowngrade("RESTRICTED", "INTERNAL"), /DOWNGRADE/);
   authorizeProvider(profile, "RESTRICTED", { providerId: "private-a", region: "us-central1", trainingOptOut: true, privateOrLocal: true });
   assert.throws(() => authorizeProvider(profile, "RESTRICTED", { providerId: "private-a", region: "us-central1", trainingOptOut: true, privateOrLocal: false }), /RESTRICTED_PROVIDER/);
   assert.throws(() => authorizeProvider(profile, "SECRET_PROHIBITED", { providerId: "private-a", region: "us-central1", trainingOptOut: true, privateOrLocal: true }), /QUARANTINE/);
-  const tenant = tenantId("tenant-a"), repo = repositoryId("repo-a"); assert.match(tenantCacheKey(tenant, repo, "cycle", "one"), /^t:tenant-a:r:repo-a:/);
-  assert.match(tenantVectorNamespace(tenant, repo, "observations"), /tenant\/tenant-a\/repository\/repo-a/); assert.match(tenantKeyAlias(tenant, repo, "receipt"), /tenants\/tenant-a/);
+  const tenant = tenantId("tenant-a"), repo = repositoryId("repo-a"); const issuer=new TenantBoundaryIssuer({assertWritesAllowed:async()=>{}});
+  assert.match(await issuer.cacheKey(tenant, repo, "cycle", "one"), /^t:tenant-a:r:repo-a:/);
+  assert.match(await issuer.vectorNamespace(tenant, repo, "observations"), /tenant\/tenant-a\/repository\/repo-a/); assert.match(await issuer.keyAlias(tenant, repo, "receipt"), /tenants\/tenant-a/);
   assert.notEqual(tenantMetricLabel(tenant, Buffer.alloc(32, 1)), tenantMetricLabel(tenantId("tenant-b"), Buffer.alloc(32, 1)));
   assert.deepEqual(privacySafeLog({ correlationId: "c", prompt: "raw", accessToken: "secret", ok: true }), { correlationId: "c", ok: true });
-  assert.throws(() => tenantCacheKey(tenant, repo, "cycle", "../escape"), /NAMESPACE/);
+  await assert.rejects(issuer.cacheKey(tenant, repo, "cycle", "../escape"), /NAMESPACE/);
   assert.equal(retentionExpiresAt("SCRATCH", "2027-01-01T00:00:00.000Z", profile), "2027-01-08T00:00:00.000Z");
   assert.throws(() => retentionExpiresAt("SCRATCH", "not-time", profile), /RETENTION_CLOCK/);
 });

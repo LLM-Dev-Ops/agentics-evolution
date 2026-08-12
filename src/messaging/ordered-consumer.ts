@@ -12,6 +12,8 @@ export class OrderedEnvelopeConsumer {
   async apply<T>(event: EvolutionEnvelope, aggregateVersion: number, effect: (client: pg.PoolClient) => Promise<T>): Promise<OrderedApplyResult<T>> {
     if (!Number.isSafeInteger(aggregateVersion) || aggregateVersion < 1) throw new TypeError("INVALID_AGGREGATE_VERSION");
     return this.database.tenantTransaction(event.tenantId, "SERIALIZABLE", async (client) => {
+      const tombstone = await client.query("SELECT 1 FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2", [event.tenantId,event.repositoryId]);
+      if (tombstone.rowCount) throw new TypeError("REPOSITORY_TOMBSTONED");
       const digest = digestBytes(new TextEncoder().encode(canonicalJson(event)));
       const prior = await client.query("SELECT payload_digest FROM inbox WHERE tenant_id=$1 AND consumer=$2 AND event_id=$3", [event.tenantId, this.consumer, event.id]);
       if (prior.rowCount) {

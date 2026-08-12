@@ -9,10 +9,14 @@ export class PostgresLocalTransport implements EventTransport {
     validateTransportMessage(message);
     if (!["evolution.commands.v1", "evolution.events.v1", "evolution.deadletter.v1", "evolution.replay.v1"].includes(topic)) throw new TypeError("INVALID_TOPIC");
     const messageId = newEventId();
-    const result = await this.database.tenantTransaction(message.envelope.tenantId, "READ COMMITTED", (client) => client.query(
+    const result = await this.database.tenantTransaction(message.envelope.tenantId, "READ COMMITTED", async (client) => {
+      const tombstone = await client.query("SELECT 1 FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2", [message.envelope.tenantId,message.envelope.repositoryId]);
+      if (tombstone.rowCount) throw new TypeError("REPOSITORY_TOMBSTONED");
+      return client.query(
       `INSERT INTO local_transport_messages(tenant_id,message_id,event_id,topic,ordering_key,envelope,attributes)
        VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(tenant_id,event_id,topic) DO UPDATE SET event_id=EXCLUDED.event_id RETURNING message_id`,
-      [message.envelope.tenantId, messageId, message.envelope.id, topic, message.orderingKey, message.envelope, message.attributes]));
+      [message.envelope.tenantId, messageId, message.envelope.id, topic, message.orderingKey, message.envelope, message.attributes]);
+    });
     return { messageId: result.rows[0].message_id };
   }
   async pull(tenantId: string, topic: string, limit = 10): Promise<readonly { messageId: string; message: TransportMessage; leaseToken: string }[]> {

@@ -29,7 +29,7 @@ if (prompt03) for (const path of ["reports/prompt-03-postgres.json", "reports/pr
   subjects.push({ path, sha256: sha256(await readFile(path)) });
 if (prompt04) for (const path of ["reports/prompt-04-benchmark.json", "reports/prompt-04-conformance.json"])
   subjects.push({ path, sha256: sha256(await readFile(path)) });
-if (prompt05) for (const path of ["reports/prompt-05-benchmark.json", "reports/prompt-05-conformance.json"])
+if (prompt05) for (const path of ["reports/prompt-05-benchmark.json", "reports/prompt-05-conformance.json", "reports/test-execution.json", "reports/governance-authority-builds.json"])
   subjects.push({ path, sha256: sha256(await readFile(path)) });
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
