@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
 import { canonicalJson } from "../shared-kernel/immutable.js";
 import { digestBytes } from "../shared-kernel/digest.js";
-import { replayEffectPolicy, type VerifiedReplayCapability } from "../messaging/replay.js";
+import type { VerifiedReplayCapability } from "../messaging/replay.js";
 import type { EventTransport, TransportMessage } from "../messaging/transport.js";
 import { PostgresPersistence } from "./postgres.js";
 
@@ -62,11 +62,14 @@ export class OutboxRelay {
       [lease.tenantId, lease.eventId, String(error).slice(0, 128)]);
   }
   async redrive(tenantId: string, eventId: string, capability: VerifiedReplayCapability): Promise<void> {
+    if (!capability?.statement) throw new TypeError("VERIFIED_REPLAY_CAPABILITY_REQUIRED");
     await this.database.tenantTransaction(tenantId, "SERIALIZABLE", async (client) => {
-      const row = await client.query("SELECT envelope FROM outbox WHERE tenant_id=$1 AND event_id=$2 AND dead_lettered_at IS NOT NULL FOR UPDATE", [tenantId, eventId]);
+      const row = await client.query("SELECT envelope,topic FROM outbox WHERE tenant_id=$1 AND event_id=$2 AND dead_lettered_at IS NOT NULL FOR UPDATE", [tenantId, eventId]);
       if (!row.rows[0]) throw new Error("DEAD_LETTER_NOT_FOUND");
-      const authorization = replayEffectPolicy("LIVE", row.rows[0].envelope, capability);
-      if (!authorization.replayId.startsWith("redrive-")) throw new TypeError("REDRIVE_CAPABILITY_REQUIRED");
+      const scope = capability.statement; const envelope = row.rows[0].envelope;
+      if (scope.purpose !== "REDRIVE" || scope.tenantId !== tenantId || scope.repositoryId !== envelope.repositoryId ||
+        scope.eventId !== eventId || scope.sourceTopic !== row.rows[0].topic || !scope.eventTypes.includes(envelope.type) || Date.parse(scope.expiresAt) <= Date.now())
+        throw new TypeError("REDRIVE_CAPABILITY_SCOPE_MISMATCH");
       const result = await client.query(`UPDATE outbox SET dead_lettered_at=NULL,next_attempt_at=transaction_timestamp(),attempts=0,last_error_code=NULL
         WHERE tenant_id=$1 AND event_id=$2 AND dead_lettered_at IS NOT NULL RETURNING event_id`, [tenantId, eventId]);
       if (result.rowCount !== 1) throw new Error("DEAD_LETTER_NOT_FOUND");

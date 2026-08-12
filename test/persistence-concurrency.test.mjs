@@ -113,7 +113,7 @@ test("replay is dry-run by default and live effects require signed scoped capabi
   const { privateKey, publicKey } = generateKeyPairSync("ed25519");
   const verifier = new ReplayCapabilityVerifier({ governance: publicKey.export({ type: "spki", format: "pem" }) });
   const statement = { schema: "agentics.replay-capability/v1", replayId: "replay-1", issuer: "governance", tenantId: envelope.tenantId,
-    repositoryId: envelope.repositoryId, eventTypes: [envelope.type], expiresAt: "2026-08-13T00:00:00.000Z" };
+    repositoryId: envelope.repositoryId, eventTypes: [envelope.type], expiresAt: "2026-08-13T00:00:00.000Z", purpose: "REPLAY", eventId: null, sourceTopic: null };
   const bytes = new TextEncoder().encode(canonicalJson(statement)); const capability = verifier.verify(bytes, sign(null, bytes, privateKey));
   const live = replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-12T00:00:00.000Z"));
   assert.equal(live.allowExternalEffects, true); assert.equal(live.allowNormalTopicPublish, false); assert.equal(live.replayId, "replay-1");
