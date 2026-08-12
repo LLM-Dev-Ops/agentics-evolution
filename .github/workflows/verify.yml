@@ -178,14 +178,14 @@ jobs:
       - run: npm install --global npm@10.9.4
       - run: npm ci --omit=optional --ignore-scripts
       - run: npm run install:platform-artifacts
-      - run: npm run verify:prompt-05
-        env:
-          AGENTICS_UPSTREAM_TOKEN: ${{ secrets.AGENTICS_UPSTREAM_TOKEN }}
       - name: Create independently anchored Prompt 05 evidence identity
         run: |
           openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/evidence-private.pem"
           openssl pkey -in "$RUNNER_TEMP/evidence-private.pem" -pubout -out "$RUNNER_TEMP/evidence-public.pem"
           { echo 'AGENTICS_RELEASE_PRIVATE_KEY<<PRIVATE_EOF'; cat "$RUNNER_TEMP/evidence-private.pem"; echo 'PRIVATE_EOF'; echo 'AGENTICS_RELEASE_PUBLIC_KEY<<PUBLIC_EOF'; cat "$RUNNER_TEMP/evidence-public.pem"; echo 'PUBLIC_EOF'; } >> "$GITHUB_ENV"
+      - run: npm run verify:prompt-05
+        env:
+          AGENTICS_UPSTREAM_TOKEN: ${{ secrets.AGENTICS_UPSTREAM_TOKEN }}
       - run: npm run evidence:provenance:prompt-05 && npm run verify:evidence
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
