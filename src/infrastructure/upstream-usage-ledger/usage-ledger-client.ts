@@ -7,7 +7,7 @@ export class UsageLedgerHttpAdapter implements UsageLedgerPort {
   private async call<T>(path: string, method: string, body: object, signal: AbortSignal): Promise<T> {
     const bearer = await this.token(); if (!bearer) throw new Error("USAGE_LEDGER_IDENTITY_UNAVAILABLE");
     const response = await this.fetcher(new URL(path, this.endpoint), { method, signal, headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" }, body: JSON.stringify(body) });
-    if (!response.ok) throw new Error("USAGE_LEDGER_UNAVAILABLE"); return await response.json() as T;
+    if (!response.ok) { if(response.status===409)throw new TypeError("USAGE_LEDGER_IDEMPOTENCY_CONFLICT");if(response.status===402||response.status===422)throw new TypeError("USAGE_LEDGER_CEILING_REJECTED");throw new Error("USAGE_LEDGER_UNAVAILABLE"); } return await response.json() as T;
   }
 }
 function validateAmount(value:string){if(!/^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,6})?$/.test(value)||Number(value)<=0)throw new TypeError("LEDGER_AMOUNT_INVALID");}

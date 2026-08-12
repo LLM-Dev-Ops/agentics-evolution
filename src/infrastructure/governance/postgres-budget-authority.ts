@@ -20,6 +20,8 @@ export class PostgresBudgetAuthority implements BudgetAuthorityPort {
       await this.outbox(client,input,"BudgetReserved",reservation.reservationId,{amount:input.amount,correlationId:input.correlationId}); return reservation;
     }), { maxAttempts: 8, baseDelayMs: 2, deadlineMs: Date.now() + 10_000 });
   }
+  /** Replays the original key through the upstream authority, then converges local saga state. */
+  async reconcile(input: BudgetReservationRequest, signal: AbortSignal): Promise<LedgerReservation> { return this.reserve(input, signal); }
   async consume(input: BudgetTransitionRequest & { actualAmount: string }, signal: AbortSignal): Promise<void> {
     const result = await this.ledger.consume({ reservationId: input.reservationId, actualAmount: input.actualAmount, idempotencyKey: input.idempotencyKey, actor: input.actor }, signal);
     await this.transition(input,"RESERVED","CONSUMED",result,input.actualAmount,"BudgetConsumed");

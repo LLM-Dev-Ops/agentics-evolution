@@ -155,8 +155,8 @@ sourceAuthorities:
     deviations: []
   - name: agentics-usage-ledger
     repository: https://github.com/LLM-Dev-Ops/agentics-usage-ledger.git
-    commit: 4ab9d188cf566bba54acaa997e3df221ed4656a8
-    sourceTree: 35790797ce01a9376f484d4bbd53d209bf5fac8b
+    commit: dbd63a6ae35a45f889170fc2ca3e611907506c45
+    sourceTree: 61657ea5f56c17f86c9729ce2485877f7b77d4e3
     path: .
     build: npm ci --ignore-scripts && npm run build
     binary: dist/index.js
