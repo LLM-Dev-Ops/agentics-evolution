@@ -7,6 +7,11 @@ upstreamContractTests:
   - test/brain-local-contract.test.mjs
   - test/upstream-behavior.test.mjs
   - test/upstream-contracts.test.mjs
+  - test/artifact-lineage.test.mjs
+  - test/offline-verifier.test.mjs
+additionalUpstreamAdapterRoots:
+  "@metaharness/flywheel": [packages/offline-verifier]
+  ruvector: [packages/offline-verifier]
 layers:
   domain: src/domain
   application: src/application

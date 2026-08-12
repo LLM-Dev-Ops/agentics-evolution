@@ -26,7 +26,7 @@ export class PostgresPersistence {
     const role = result.rows[0];
     if (!role || role.rolsuper || role.rolbypassrls || !role.app_member) throw new Error("UNSAFE_POSTGRES_RUNTIME_ROLE");
   }
-  async tenantTransaction<T>(tenant: string, isolation: "READ COMMITTED" | "SERIALIZABLE", operation: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  async tenantTransaction<T>(tenant: string, isolation: "READ COMMITTED" | "REPEATABLE READ" | "SERIALIZABLE", operation: (client: pg.PoolClient) => Promise<T>): Promise<T> {
     if (this.#enforceRuntimeRole) await (this.#runtimeVerified ??= this.verifyRuntimeSafety());
     const client = await this.pool.connect();
     try {

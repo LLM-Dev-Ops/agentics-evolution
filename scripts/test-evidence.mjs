@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 
-const files = (await readdir("test"))
+const selected = process.env.AGENTICS_TEST_FILES?.split(",").filter(Boolean);
+const files = (selected ?? (await readdir("test"))
   .filter((file) => file.endsWith(".test.mjs"))
   .sort()
-  .map((file) => `test/${file}`);
+  .map((file) => `test/${file}`));
 const run = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...files], {
   encoding: "utf8",
   env: { ...process.env, FORCE_COLOR: "0" }

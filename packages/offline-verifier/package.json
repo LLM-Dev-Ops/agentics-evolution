@@ -1,0 +1,20 @@
+{
+  "name": "@agentics-evolution/offline-verifier",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": { "agentics-verify": "./cli.mjs" },
+  "exports": "./index.mjs",
+  "engines": { "node": ">=20 <21" },
+  "dependencies": {
+    "@metaharness/flywheel": "0.1.10",
+    "@ruvector/rvf": "0.2.3",
+    "ruvector": "0.2.41"
+  },
+  "optionalDependencies": {
+    "@ruvector/rvf-node-linux-arm64-gnu": "0.1.7",
+    "@ruvector/rvf-node-linux-x64-gnu": "0.1.7",
+    "ruvector-core-linux-arm64-gnu": "0.1.30",
+    "ruvector-core-linux-x64-gnu": "0.1.30"
+  }
+}
