@@ -7,7 +7,7 @@ import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
   withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES,
-  ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, OrderedEnvelopeConsumer, canonicalJson
+  ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, ReplayEffectExecutor, OrderedEnvelopeConsumer, canonicalJson
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -106,7 +106,7 @@ test("transport enforces exact 256 KiB UTF-8 boundary and trace binding", () => 
   assert.throws(() => validateTransportMessage({ ...baseMessage, orderingKey: "tenant-a/repo-b/transport-a" }), /INVALID_ORDERING_KEY/);
 });
 
-test("replay is dry-run by default and live effects require signed scoped capability", () => {
+test("replay is dry-run by default and live effects require signed scoped capability", async () => {
   const envelope = messageEnvelope(36); const dryRun = replayEffectPolicy("DRY_RUN", envelope);
   assert.equal(dryRun.allowExternalEffects, false); assert.equal(dryRun.allowNormalTopicPublish, false);
   assert.throws(() => replayEffectPolicy("LIVE", envelope, { statement: {} }), /VERIFIED_REPLAY_CAPABILITY_REQUIRED/);
@@ -121,6 +121,9 @@ test("replay is dry-run by default and live effects require signed scoped capabi
   assert.throws(() => replayEffectPolicy("LIVE", envelope, capability, Date.parse("2026-08-14T00:00:00.000Z")), /REPLAY_CAPABILITY_EXPIRED/);
   const altered = new TextEncoder().encode(canonicalJson({ ...statement, tenantId: "tenant-b" }));
   assert.throws(() => verifier.verify(altered, sign(null, bytes, privateKey)), /UNTRUSTED_REPLAY_CAPABILITY/);
+  const executor = new ReplayEffectExecutor(); let externalEffects = 0;
+  assert.equal(await executor.execute(dryRun, async () => "comparison-only", async () => { externalEffects++; return "external"; }), "comparison-only"); assert.equal(externalEffects, 0);
+  assert.equal(await executor.execute(live, async () => "comparison-only", async () => { externalEffects++; return "external"; }), "external"); assert.equal(externalEffects, 1);
 });
 
 test("replay transport uses an isolated topic and effect metadata", { skip: !url }, async () => {
@@ -226,6 +229,7 @@ test("Pub/Sub emulator uses the same validated message contract and redelivers n
     });
     assert.equal(poison.reason, "MALFORMED_ENVELOPE"); assert.equal(poison.attributes.correlationId, envelope.correlationId);
     assert.equal(poison.attributes.traceparent, "00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01"); assert.equal("secret" in poison.attributes, false);
+    assert.equal(Buffer.from(poison.payloadBase64, "base64").toString("utf8"), "{malformed");
   } finally {
     await client.subscription(subscriptionName).delete().catch(() => undefined); await client.subscription(poisonSubscription).delete().catch(() => undefined);
     await client.subscription(deadLetterSubscription).delete().catch(() => undefined);

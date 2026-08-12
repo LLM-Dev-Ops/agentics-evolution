@@ -3,6 +3,7 @@ import type { EvolutionEnvelope } from "../shared-kernel/evolution-envelope.js";
 import { canonicalJson, deepFreeze } from "../shared-kernel/immutable.js";
 import type { PostgresLocalTransport } from "./postgres-local-transport.js";
 import type { TransportMessage } from "./transport.js";
+import type { EventTransport } from "./transport.js";
 
 const replayCapabilityBrand: unique symbol = Symbol("VerifiedReplayCapability");
 export interface ReplayCapabilityStatement { readonly schema: "agentics.replay-capability/v1"; readonly replayId: string; readonly issuer: string;
@@ -52,12 +53,20 @@ export function replayEffectPolicy(mode: "DRY_RUN" | "LIVE", envelope: Evolution
 }
 
 export class ReplayTransport {
-  constructor(readonly transport: PostgresLocalTransport, readonly topic = "evolution.replay.v1") {}
+  constructor(readonly transport: EventTransport & Partial<Pick<PostgresLocalTransport, "pull">>, readonly topic = "evolution.replay.v1") {}
   async publish(message: TransportMessage, policy: ReplayEffectPolicy): Promise<{ messageId: string }> {
     if (!policy.replay || policy.tenantId !== message.envelope.tenantId || policy.repositoryId !== message.envelope.repositoryId) throw new TypeError("REPLAY_POLICY_SCOPE_MISMATCH");
     const replayMessage = { ...message, attributes: { ...message.attributes, replay: "true", replayId: policy.replayId,
       effectMode: policy.allowExternalEffects ? "LIVE_SCOPED" : "DRY_RUN" } };
     return this.transport.publish(this.topic, replayMessage);
   }
-  pull(tenantId: string, limit = 10) { return this.transport.pull(tenantId, this.topic, limit); }
+  pull(tenantId: string, limit = 10) { if (!this.transport.pull) throw new TypeError("REPLAY_SUBSCRIPTION_REQUIRED"); return this.transport.pull(tenantId, this.topic, limit); }
+}
+
+export class ReplayEffectExecutor {
+  async execute<T>(policy: ReplayEffectPolicy, dryRun: () => Promise<T>, live?: () => Promise<T>): Promise<T> {
+    if (!policy.replay || policy.allowNormalTopicPublish !== false) throw new TypeError("INVALID_REPLAY_EFFECT_POLICY");
+    if (!policy.allowExternalEffects) return dryRun();
+    if (!live) throw new TypeError("LIVE_REPLAY_EFFECT_HANDLER_REQUIRED"); return live();
+  }
 }

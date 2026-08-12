@@ -2,11 +2,12 @@ import { PubSub, type Message } from "@google-cloud/pubsub";
 import { createHash } from "node:crypto";
 import type { EventTransport, PublishReceipt, TransportMessage } from "./transport.js";
 import { validateTransportMessage } from "./transport.js";
+import { assertVerifiedReplayCapability, type VerifiedReplayCapability } from "./replay.js";
 
 export class GooglePubSubTransport implements EventTransport {
   constructor(readonly client: PubSub) {}
   async publish(topic: string, message: TransportMessage): Promise<PublishReceipt> {
-    if (!["evolution.commands.v1", "evolution.events.v1", "evolution.deadletter.v1"].includes(topic)) throw new TypeError("INVALID_TOPIC");
+    if (!["evolution.commands.v1", "evolution.events.v1", "evolution.deadletter.v1", "evolution.replay.v1"].includes(topic)) throw new TypeError("INVALID_TOPIC");
     const data = validateTransportMessage(message);
     const messageId = await this.client.topic(topic, { messageOrdering: true }).publishMessage({ data: Buffer.from(data), orderingKey: message.orderingKey, attributes: { ...message.attributes } });
     return { messageId };
@@ -21,7 +22,7 @@ export interface PubSubDelivery {
 }
 
 export interface PoisonMessageRecord { readonly messageId: string; readonly subscription: string; readonly reason: string;
-  readonly payloadSha256: string; readonly attributes: Readonly<Record<string, string>>; readonly orderingKey: string; }
+  readonly payloadSha256: string; readonly payloadBase64: string; readonly attributes: Readonly<Record<string, string>>; readonly orderingKey: string; }
 export interface PoisonMessageSink { record(record: PoisonMessageRecord): Promise<void>; }
 
 export class GooglePubSubPoisonSink implements PoisonMessageSink {
@@ -29,6 +30,14 @@ export class GooglePubSubPoisonSink implements PoisonMessageSink {
   async record(record: PoisonMessageRecord): Promise<void> {
     await this.client.topic(this.topic).publishMessage({ data: Buffer.from(JSON.stringify(record)),
       orderingKey: record.orderingKey, attributes: { reason: record.reason, originalMessageId: record.messageId, ...record.attributes } });
+  }
+  async redrive(record: PoisonMessageRecord, sourceTopic: string, capability: VerifiedReplayCapability): Promise<string> {
+    assertVerifiedReplayCapability(capability);
+    const scope = capability.statement;
+    if (scope.purpose !== "REDRIVE" || scope.eventId !== record.messageId || scope.sourceTopic !== sourceTopic || Date.parse(scope.expiresAt) <= Date.now()) throw new TypeError("REDRIVE_CAPABILITY_SCOPE_MISMATCH");
+    const bytes = Buffer.from(record.payloadBase64, "base64"); if (createHash("sha256").update(bytes).digest("hex") !== record.payloadSha256) throw new TypeError("POISON_PAYLOAD_DIGEST_MISMATCH");
+    return this.client.topic(sourceTopic, { messageOrdering: true }).publishMessage({ data: bytes, orderingKey: record.orderingKey,
+      attributes: { ...record.attributes, redriveId: scope.replayId, redriveCount: "1" } });
   }
 }
 
@@ -48,7 +57,8 @@ export class GooglePubSubConsumer {
         } catch (error) {
           try {
             await this.poisonSink.record({ messageId: raw.id, subscription: subscriptionName, reason: normalizePoisonReason(error),
-              payloadSha256: createHash("sha256").update(raw.data).digest("hex"), attributes: filterAttributes(raw.attributes), orderingKey: raw.orderingKey ?? "" });
+              payloadSha256: createHash("sha256").update(raw.data).digest("hex"), payloadBase64: raw.data.toString("base64"),
+              attributes: filterAttributes(raw.attributes), orderingKey: raw.orderingKey ?? "" });
             raw.ack(); cleanup(); reject(Object.assign(new Error("PUBSUB_POISON_DEAD_LETTERED"), { cause: error }));
           } catch (sinkError) { raw.nack(); cleanup(); reject(Object.assign(new Error("PUBSUB_POISON_SINK_FAILED"), { cause: sinkError })); }
         }
