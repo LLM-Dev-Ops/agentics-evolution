@@ -58,3 +58,14 @@ jobs:
           path: reports/brain-local-build.json
           if-no-files-found: error
           retention-days: 30
+  linux-arm64-capabilities:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --ignore-scripts
+      - run: npm run lint && npm run typecheck && npm run build
+      - name: Verify arm64 native capability selection
+        run: node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"
