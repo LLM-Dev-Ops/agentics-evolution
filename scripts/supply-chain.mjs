@@ -14,7 +14,7 @@ const lock = JSON.parse(lockText);
 const catalog = parse(catalogText);
 const policy = JSON.parse(policyText);
 const failures = [];
-const dependencies = { ...manifest.dependencies, ...manifest.devDependencies };
+const dependencies = { ...manifest.dependencies, ...manifest.optionalDependencies, ...manifest.devDependencies };
 const forbiddenLicense = /(?:^|\s|\()(?:AGPL|SSPL|BUSL)(?:-|\s|\)|$)/i;
 
 if (manifest.engines?.node !== ">=20 <21") failures.push("Node runtime must be constrained to major 20");
@@ -67,10 +67,25 @@ for (const authority of catalog.authorities) {
     failures.push(`${authority.package}: unable to verify registry maintainers: ${error.message}`);
   }
 }
+const optional = manifest.optionalDependencies ?? {};
+const catalogArtifacts = new Map((catalog.platformArtifacts ?? []).map((artifact) => [artifact.package, artifact]));
+if (catalogArtifacts.size !== Object.keys(optional).length)
+  failures.push("platform artifact catalog must exactly cover optionalDependencies");
+for (const [name, version] of Object.entries(optional)) {
+  const artifact = catalogArtifacts.get(name);
+  const locked = lock.packages?.[`node_modules/${name}`];
+  if (!artifact) failures.push(`${name}: optional production artifact is not cataloged`);
+  else {
+    if (artifact.version !== version) failures.push(`${name}: platform catalog/manifest version mismatch`);
+    if (artifact.integrity !== locked?.integrity) failures.push(`${name}: platform catalog/lock integrity mismatch`);
+  }
+}
+for (const name of catalogArtifacts.keys())
+  if (!(name in optional)) failures.push(`${name}: cataloged platform artifact is absent from optionalDependencies`);
 
 let audit;
 try {
-  audit = JSON.parse(execFileSync("npm", ["audit", "--omit=optional", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
+  audit = JSON.parse(execFileSync("npm", ["audit", "--include=optional", "--json"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
 } catch (error) {
   const output = error.stdout?.toString();
   try { audit = JSON.parse(output); } catch { failures.push(`npm audit failed: ${error.message}`); }

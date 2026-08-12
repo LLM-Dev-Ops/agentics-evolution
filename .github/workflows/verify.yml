@@ -16,7 +16,7 @@ jobs:
       - name: Verify pinned toolchain
         run: test "$(node --version)" = "v20.19.5" && test "$(npm --version)" = "10.9.4"
       - name: Install complete capability-test graph
-        run: npm ci --ignore-scripts
+        run: npm ci --include=optional --ignore-scripts
       - name: Create independently anchored CI evidence identity
         shell: bash
         run: |
@@ -49,7 +49,7 @@ jobs:
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
         with: { shared-key: ruvector-brain-local-9e12078a }
       - run: npm install --global npm@10.9.4
-      - run: npm ci --ignore-scripts
+      - run: npm ci --include=optional --ignore-scripts
       - run: npm run verify:brain-local
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
@@ -65,7 +65,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with: { node-version: 20.19.5, cache: npm }
       - run: npm install --global npm@10.9.4
-      - run: npm ci --ignore-scripts
+      - run: npm ci --include=optional --ignore-scripts
       - run: npm run lint && npm run typecheck && npm run build
       - name: Verify arm64 native capability selection
         run: node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"
