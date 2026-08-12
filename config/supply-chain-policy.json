@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "agentics.supply-chain-policy/v1",
+  "registryOrigin": "https://registry.npmjs.org",
+  "approvedMaintainers": ["ruvnet <ruv@ruv.net>"],
+  "forbiddenLicenses": ["AGPL", "SSPL", "BUSL"]
+}

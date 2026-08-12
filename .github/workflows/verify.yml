@@ -1,0 +1,71 @@
+name: verify
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  prompt-01:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - name: Verify pinned toolchain
+        run: test "$(node --version)" = "v20.19.5" && test "$(npm --version)" = "10.9.4"
+      - name: Install complete capability-test graph
+        run: npm ci --omit=optional --ignore-scripts && npm run install:platform-artifacts
+      - name: Create independently anchored CI evidence identity
+        shell: bash
+        run: |
+          openssl genpkey -algorithm ED25519 -out "$RUNNER_TEMP/evidence-private.pem"
+          openssl pkey -in "$RUNNER_TEMP/evidence-private.pem" -pubout -out "$RUNNER_TEMP/evidence-public.pem"
+          {
+            echo 'AGENTICS_RELEASE_PRIVATE_KEY<<PRIVATE_EOF'
+            cat "$RUNNER_TEMP/evidence-private.pem"
+            echo 'PRIVATE_EOF'
+            echo 'AGENTICS_RELEASE_PUBLIC_KEY<<PUBLIC_EOF'
+            cat "$RUNNER_TEMP/evidence-public.pem"
+            echo 'PUBLIC_EOF'
+          } >> "$GITHUB_ENV"
+      - run: npm run verify:prompt-01
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: prompt-01-evidence-${{ github.sha }}
+          path: reports/
+          if-no-files-found: error
+          retention-days: 30
+  brain-local-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with: { toolchain: 1.97.1 }
+      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        with: { shared-key: ruvector-brain-local-9e12078a }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --omit=optional --ignore-scripts && npm run install:platform-artifacts
+      - run: npm run verify:brain-local
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: brain-local-evidence-${{ github.sha }}
+          path: reports/brain-local-build.json
+          if-no-files-found: error
+          retention-days: 30
+  linux-arm64-capabilities:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with: { node-version: 20.19.5, cache: npm }
+      - run: npm install --global npm@10.9.4
+      - run: npm ci --omit=optional --ignore-scripts && npm run install:platform-artifacts
+      - run: npm run lint && npm run typecheck && npm run build
+      - name: Verify arm64 native capability selection
+        run: NODE_PATH=.agentics-platform/node_modules node -e "import('ruvector').then(r => { if (!r.isNativeAvailable() || !r.isRvfAvailable() || !r.isSonaAvailable()) process.exit(1) })"

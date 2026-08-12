@@ -1,0 +1,16 @@
+node_modules/
+.agentics-platform/
+dist/
+reports/*.json
+!reports/.gitkeep
+reports/*.txt
+*.log
+
+# Codex local configuration
+.codex/
+# Ruflo runtime state is local evidence, never source.
+.claude-flow/
+# Environment variables
+.env
+.env.local
+.env.*.local

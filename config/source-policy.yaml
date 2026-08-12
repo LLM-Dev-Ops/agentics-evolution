@@ -1,0 +1,54 @@
+schemaVersion: agentics.source-policy/v1
+maxLines: 500
+scanRoots: [src, scripts, test, config]
+publicEntrypoints: [src/index.ts]
+upstreamContractTests:
+  - test/acl-contract.test.mjs
+  - test/brain-local-contract.test.mjs
+  - test/upstream-behavior.test.mjs
+  - test/upstream-contracts.test.mjs
+layers:
+  domain: src/domain
+  application: src/application
+  infrastructure: src/infrastructure
+generatedExemptions:
+  - { path: package-lock.json, reason: npm-generated reproducibility lock }
+  - { path: reports/sbom.cdx.json, reason: CycloneDX-generated evidence, optional: true }
+  - { path: reports/conformance.json, reason: conformance-generated evidence, optional: true }
+allowedUpstreamAdapters:
+  ruflo: src/infrastructure/upstream-ruflo
+  claude-flow: src/infrastructure/upstream-ruflo
+  "@claude-flow/cli": src/infrastructure/upstream-ruflo
+  metaharness: src/infrastructure/upstream-metaharness
+  "@metaharness/darwin": src/infrastructure/upstream-darwin
+  "@metaharness/flywheel": src/infrastructure/upstream-flywheel
+  "@metaharness/redblue": src/infrastructure/upstream-redblue
+  "@metaharness/turn-credit": src/infrastructure/upstream-turn-credit
+  "@metaharness/router": src/infrastructure/upstream-router
+  "@metaharness/harness": src/infrastructure/upstream-harness
+  "@metaharness/kernel": src/infrastructure/upstream-metaharness
+  "@metaharness/host-claude-code": src/infrastructure/upstream-metaharness
+  "@metaharness/host-codex": src/infrastructure/upstream-metaharness
+  ruvector: src/infrastructure/upstream-ruvector
+  "@ruvector/rvf": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-node-linux-arm64-gnu": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-node-linux-x64-gnu": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-solver": src/infrastructure/upstream-ruvector
+  "@ruvector/rvf-wasm": src/infrastructure/upstream-ruvector
+  ruvector-core-linux-arm64-gnu: src/infrastructure/upstream-ruvector
+  ruvector-core-linux-x64-gnu: src/infrastructure/upstream-ruvector
+forbiddenAlgorithmSymbols: [evolve, inspectVariant, validateGeneratedCode, flywheelGate, reasoningBank, nightlyLearner, vectorSearch]
+algorithmFingerprints:
+  # SHA-256 of identifier/literal-normalized TypeScript AST shapes. These are
+  # detection evidence only; no upstream algorithm source is stored here.
+  darwin-search: [7725e4be84dffcd1dd4529a2314cde9b542fa897bdc39a0be2fdc787fb2c4dcc]
+  darwin-safety: [c80f42e438a7523d19981cef2c0affcb7f6ed17fc34cc7f5f097a872171364ad]
+  flywheel-gate: [57f5abd595e6953cc57b4c655036ead51c2df73f133a0894348955e2ce19123c]
+  flywheel-sequential: [02c9a16cb0c705ea0a709e14aa30a096ac8b001f308620c6e89b3101815715f2]
+  flywheel-canonicalization: [bf233b66e7dfeba212614ea8bb9b612a72431f3760a6873a3a2bf55c462d3af7]
+  flywheel-signing: [455f9b8b0817a887df4db5a16c1347b6037eb528e1c808ce34648974f615d7ed]
+  flywheel-replay: [910e7a665b94d1e6d0b7062eadd6f0508d35a023c88e2665a1865efaa0c0c251]
+  router-scoring: [b12ac0f6da47a7f8d83e6f3ef88a97406348fd4405af16f562218300dfaf0efd]
+  ruvector-similarity: [2f1d9c6eda3a9e62601f0d7c8dd8dd0bafec79e31e2d8a347d006d0a15d13ecc]
+  ruvector-sona: [6153f2332c1c1545d772385b6f02827c49d5bcff30cea6e70f4c4e3576815bd5]
+requiredAlgorithmFamilies: [darwin-search, darwin-safety, flywheel-gate, flywheel-sequential, flywheel-canonicalization, flywheel-signing, flywheel-replay, router-scoring, ruvector-similarity, ruvector-sona]

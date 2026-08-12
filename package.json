@@ -1,0 +1,68 @@
+{
+  "name": "agentics-evolution",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "engines": { "node": ">=20 <21" },
+  "packageManager": "npm@10.9.4",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "node scripts/check-source.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:evidence": "NODE_PATH=.agentics-platform/node_modules node scripts/test-evidence.mjs",
+    "conformance": "node scripts/conformance.mjs",
+    "probe:upstreams": "NODE_PATH=.agentics-platform/node_modules node scripts/probe-upstreams.mjs",
+    "install:platform-artifacts": "node scripts/install-platform-artifacts.mjs",
+    "evidence:supply-chain": "node scripts/supply-chain.mjs",
+    "build:brain-local": "node scripts/build-brain-local.mjs",
+    "verify:brain-local": "node scripts/verify-brain-local.mjs",
+    "evidence:sbom": "node scripts/generate-sbom.mjs",
+    "evidence:provenance": "node scripts/provenance.mjs",
+    "verify:sbom": "node scripts/validate-sbom.mjs",
+    "verify:evidence": "node scripts/verify-evidence.mjs",
+    "verify:reproducibility": "node scripts/reproducibility.mjs",
+    "benchmark:foundation": "node scripts/benchmark-foundation.mjs",
+    "verify:prompt-01": "npm run lint && npm run typecheck && npm run build && npm run test:evidence && npm run conformance && npm run probe:upstreams && npm run evidence:supply-chain && npm run evidence:sbom && npm run verify:sbom && npm run evidence:provenance && npm run verify:evidence && npm run verify:reproducibility && npm run benchmark:foundation"
+  },
+  "dependencies": {
+    "@claude-flow/cli": "3.38.0",
+    "@metaharness/darwin": "0.9.1",
+    "@metaharness/flywheel": "0.1.10",
+    "@metaharness/harness": "0.2.0",
+    "@metaharness/host-claude-code": "0.1.2",
+    "@metaharness/host-codex": "0.1.2",
+    "@metaharness/kernel": "0.1.3",
+    "@metaharness/redblue": "0.1.4",
+    "@metaharness/router": "0.4.0",
+    "@metaharness/turn-credit": "0.1.0",
+    "claude-flow": "3.38.0",
+    "metaharness": "0.4.5",
+    "ruflo": "3.38.0",
+    "ruvector": "0.2.41"
+  },
+  "agentics": {
+    "platformDependencies": {
+      "@ruvector/rvf": "0.2.3",
+      "@ruvector/rvf-node-linux-arm64-gnu": "0.1.7",
+      "@ruvector/rvf-node-linux-x64-gnu": "0.1.7",
+      "@ruvector/rvf-solver": "0.1.8",
+      "@ruvector/rvf-wasm": "0.1.9",
+      "ruvector-core-linux-arm64-gnu": "0.1.30",
+      "ruvector-core-linux-x64-gnu": "0.1.30"
+    }
+  },
+  "devDependencies": {
+    "@cyclonedx/cyclonedx-npm": "6.0.1",
+    "@types/node": "20.19.17",
+    "typescript": "5.9.3",
+    "yaml": "2.9.0"
+  }
+}
