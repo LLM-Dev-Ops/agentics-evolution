@@ -9,5 +9,6 @@ export * from "./persistence/critical-resources.js";
 export * from "./messaging/transport.js";
 export * from "./messaging/pubsub-transport.js";
 export * from "./messaging/replay.js";
+export * from "./messaging/ordered-consumer.js";
 export * from "./messaging/postgres-local-transport.js";
 export * from "./application/ports/index.js";

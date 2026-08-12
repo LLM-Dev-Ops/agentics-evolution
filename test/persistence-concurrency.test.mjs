@@ -7,7 +7,7 @@ import {
   actorId, aggregateId, correlationId, causationId, createEnvelope, cycleId, digestBytes, digestReference, eventId,
   idempotencyKey, PostgresPersistence, PostgresLocalTransport, CriticalResourceStore, repositoryId, sourceSnapshot, tenantId, utcInstant,
   withSerializableRetry, GooglePubSubTransport, GooglePubSubConsumer, GooglePubSubPoisonSink, validateTransportMessage, MAX_ENVELOPE_BYTES,
-  ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, canonicalJson
+  ReplayCapabilityVerifier, replayEffectPolicy, ReplayTransport, OrderedEnvelopeConsumer, canonicalJson
 } from "../dist/index.js";
 const { Client } = pg;
 const url = process.env.TEST_DATABASE_URL;
@@ -181,15 +181,17 @@ test("delayed and reordered delivery cannot violate aggregate version applicatio
     const firstId = queued.rows.find((row) => row.event_id === firstEnvelope.id).message_id;
     await transport.delay("tenant-a", firstId, new Date(Date.now() + 60_000));
     const deliveredSecond = await transport.pull("tenant-a", "evolution.events.v1", 10); const second = deliveredSecond.find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(second);
-    let expectedVersion = 1;
-    const apply = (delivery, version) => { if (version !== expectedVersion) return "GAP_DEFERRED"; expectedVersion++; return "APPLIED"; };
-    assert.equal(apply(second, 2), "GAP_DEFERRED"); await transport.defer("tenant-a", second.messageId, second.leaseToken, 60_000);
+    await database.pool.query("INSERT INTO aggregates(tenant_id,repository_id,aggregate_id,aggregate_type,version,state) VALUES('tenant-a','repo-a',$1,'ordered-consumer',0,'{}')", [aggregate]);
+    const consumer = new OrderedEnvelopeConsumer(database, `ordered-${aggregate}`);
+    const persist = (event, version) => async (client) => { await client.query(`INSERT INTO domain_events(tenant_id,repository_id,aggregate_id,event_id,aggregate_version,event_type,envelope,occurred_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, [event.tenantId, event.repositoryId, event.aggregateId, event.id, version, event.type, event, event.occurredAt]); return version; };
+    assert.equal((await consumer.apply(second.message.envelope, 2, persist(second.message.envelope, 2))).kind, "GAP_DEFERRED"); await transport.defer("tenant-a", second.messageId, second.leaseToken, 60_000);
     await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp(),lease_token=NULL,lease_expires_at=NULL WHERE tenant_id='tenant-a' AND event_id=$1", [firstEnvelope.id]);
     const delivery = await transport.pull("tenant-a", "evolution.events.v1", 10); const one = delivery.find((item) => item.message.envelope.id === firstEnvelope.id); assert.ok(one);
-    assert.equal(apply(one, 1), "APPLIED"); await transport.ack("tenant-a", one.messageId, one.leaseToken);
+    assert.equal((await consumer.apply(one.message.envelope, 1, persist(one.message.envelope, 1))).kind, "APPLIED"); await transport.ack("tenant-a", one.messageId, one.leaseToken);
     await database.pool.query("UPDATE local_transport_messages SET available_at=transaction_timestamp() WHERE tenant_id='tenant-a' AND event_id=$1", [secondEnvelope.id]);
     const retry = (await transport.pull("tenant-a", "evolution.events.v1", 10)).find((item) => item.message.envelope.id === secondEnvelope.id); assert.ok(retry);
-    assert.equal(apply(retry, 2), "APPLIED"); await transport.ack("tenant-a", retry.messageId, retry.leaseToken);
+    assert.equal((await consumer.apply(retry.message.envelope, 2, persist(retry.message.envelope, 2))).kind, "APPLIED"); await transport.ack("tenant-a", retry.messageId, retry.leaseToken);
   } finally { await database.close(); }
 });
 
