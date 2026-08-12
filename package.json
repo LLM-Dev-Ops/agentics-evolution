@@ -42,10 +42,15 @@
     "@metaharness/redblue": "0.1.4",
     "@metaharness/router": "0.4.0",
     "@metaharness/turn-credit": "0.1.0",
+    "@ruvector/rvf": "0.2.3",
+    "@ruvector/rvf-node-linux-x64-gnu": "0.2.2",
+    "@ruvector/rvf-solver": "0.1.8",
+    "@ruvector/rvf-wasm": "0.1.9",
     "claude-flow": "3.38.0",
     "metaharness": "0.4.5",
     "ruflo": "3.38.0",
-    "ruvector": "0.2.41"
+    "ruvector": "0.2.41",
+    "ruvector-core-linux-x64-gnu": "0.1.30"
   },
   "devDependencies": {
     "@cyclonedx/cyclonedx-npm": "6.0.1",
