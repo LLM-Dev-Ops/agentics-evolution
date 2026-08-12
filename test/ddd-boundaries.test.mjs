@@ -13,7 +13,7 @@ packageName: agentics-evolution
 contexts: [${names.join(", ")}]
 requiredLayers: [domain, application, infrastructure]
 publicEntrypoint: index.ts
-allowedCrossContextTargets: [published-language, application]
+allowedCrossContextTargets: [published-language]
 forbiddenPublicSegments: [infrastructure]
 upstreamPackages: [ruflo, "@metaharness/darwin", "@metaharness/flywheel", ruvector]
 `;
@@ -94,7 +94,7 @@ test("rejects mutable aggregate ID and accepts immutable past-tense event", asyn
   }));
   expectFailure(rejected, /aggregateId must be readonly/);
   const accepted = validate(await fixture({
-    "src/contexts/dream/domain/index.ts": "interface DomainEvent {}\nexport interface HypothesisProposed extends DomainEvent { readonly aggregateId: string }\n"
+    "src/contexts/dream/domain/index.ts": "interface DomainEvent {}\nexport interface HypothesisProposed extends DomainEvent { readonly aggregateId: string; readonly tenantId: string; readonly repositoryId: string; readonly occurredAt: string; readonly correlationId: string; readonly causationId: string; readonly idempotencyKey: string }\n"
   }));
   assert.equal(accepted.status, 0, accepted.stderr);
 });

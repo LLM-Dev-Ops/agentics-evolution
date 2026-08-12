@@ -7,7 +7,8 @@ import {
   observeUnknown,
   requireKnown,
   validateCallContext,
-  validateUpstreamEvidence
+  validateUpstreamEvidence,
+  validatedPortResponse
 } from "../dist/application/ports/acl-contract.js";
 import { canonicalJson, mapUpstreamError, negotiateVersion, withDeadline } from "../dist/upstream/contract.js";
 import { newCorrelationId, repositoryId, tenantId, utcInstant } from "../dist/index.js";
@@ -48,10 +49,12 @@ test("call context and upstream evidence bind correlation, exact version, and ca
   const signal = new AbortController().signal;
   const correlationId = newCorrelationId();
   validateCallContext({ tenantId: tenantId("tenant"), repositoryId: repositoryId("repo"), correlationId, deadline: utcInstant("2099-01-01T00:00:00.000Z"), signal });
-  const expected = { authority: "darwin", exactVersion: "0.9.1", correlationId };
+  const expected = { authority: "darwin", exactVersion: "0.9.1", correlationId, capabilityDigest: `sha256:${"a".repeat(64)}` };
   validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.1", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected);
   assert.throws(() => validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.2", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected), /version/);
   assert.throws(() => validateUpstreamEvidence({ authority: "other", exactVersion: "0.9.1", capabilityDigest: `sha256:${"a".repeat(64)}`, correlationId }, expected), /authority/);
+  assert.throws(() => validateUpstreamEvidence({ authority: "darwin", exactVersion: "0.9.1", capabilityDigest: `sha256:${"b".repeat(64)}`, correlationId }, expected), /capability/);
+  assert.equal(validatedPortResponse({ ok: true }, { authority: "darwin", exactVersion: "0.9.1", capabilityDigest: expected.capabilityDigest, correlationId }, expected).data.ok, true);
 });
 
 test("each ACL passes golden, error, deadline, cancellation, and version contracts", async () => {

@@ -16,8 +16,11 @@ const required = [
 ];
 const subjects = [];
 for (const path of required) subjects.push({ path, sha256: sha256(await readFile(path)) });
+const prompt02 = process.env.AGENTICS_BUILD_PROMPT === "02";
 for (const path of ["reports/prompt-02-benchmark.json", "reports/prompt-02-ddd-boundaries.json", "reports/prompt-02-properties.json"]) {
-  if (await access(path).then(() => true, () => false)) subjects.push({ path, sha256: sha256(await readFile(path)) });
+  const exists = await access(path).then(() => true, () => false);
+  if (prompt02 && !exists) throw new Error(`Prompt 02 provenance requires ${path}`);
+  if (exists && prompt02) subjects.push({ path, sha256: sha256(await readFile(path)) });
 }
 const commit = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
 const dirty = execFileSync("git", ["status", "--porcelain"], { encoding: "utf8" }).trim();
@@ -29,9 +32,9 @@ const statement = {
   predicateType: "https://slsa.dev/provenance/v1",
   predicate: {
     buildDefinition: {
-      buildType: subjects.some(({ path }) => path.includes("prompt-02")) ? "https://agentics.dev/build-types/prompt-02-evidence/v1" : "https://agentics.dev/build-types/prompt-01-evidence/v1",
+      buildType: prompt02 ? "https://agentics.dev/build-types/prompt-02-evidence/v1" : "https://agentics.dev/build-types/prompt-01-evidence/v1",
       externalParameters: { source: { uri: "git+https://github.com/LLM-Dev-Ops/agentics-evolution", digest: { gitCommit: commit } } },
-      internalParameters: { command: "npm run verify:prompt-01", evidenceMode: process.env.AGENTICS_EVIDENCE_MODE ?? "production" },
+      internalParameters: { command: prompt02 ? "npm run verify:prompt-02" : "npm run verify:prompt-01", evidenceMode: process.env.AGENTICS_EVIDENCE_MODE ?? "production" },
       resolvedDependencies: [
         { uri: "pkg:generic/node", digest: { version: process.version } },
         { uri: "pkg:npm/npm", digest: { version: npmVersion } }

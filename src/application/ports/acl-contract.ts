@@ -52,14 +52,21 @@ export function validateCallContext(context: UpstreamCallContext): void {
   if (context.signal.aborted) throw context.signal.reason ?? new DOMException("cancelled", "AbortError");
 }
 
-export function validateUpstreamEvidence(evidence: UpstreamEvidence, expected: Readonly<{ correlationId: CorrelationId; authority: string; exactVersion: string }>): void {
+export interface ExpectedUpstreamEvidence { readonly correlationId: CorrelationId; readonly authority: string; readonly exactVersion: string; readonly capabilityDigest: `sha256:${Sha256Digest}`; }
+export function validateUpstreamEvidence(evidence: UpstreamEvidence, expected: ExpectedUpstreamEvidence): void {
   if (evidence.correlationId !== expected.correlationId) throw new Error("INCOMPATIBLE: upstream correlation mismatch");
   if (evidence.authority !== expected.authority) throw new Error("INCOMPATIBLE: upstream authority mismatch");
   if (evidence.exactVersion !== expected.exactVersion) throw new Error("INCOMPATIBLE: upstream version mismatch");
+  if (evidence.capabilityDigest !== expected.capabilityDigest) throw new Error("INCOMPATIBLE: upstream capability digest mismatch");
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(evidence.exactVersion))
     throw new Error("INCOMPATIBLE: upstream version is not exact");
   if (!/^sha256:[a-f0-9]{64}$/.test(evidence.capabilityDigest))
     throw new Error("INCOMPATIBLE: invalid capability digest");
+}
+
+export function validatedPortResponse<T>(data: T, upstream: UpstreamEvidence, expected: ExpectedUpstreamEvidence): Readonly<PortResponse<T>> {
+  validateUpstreamEvidence(upstream, expected);
+  return Object.freeze({ data, upstream: Object.freeze({ ...upstream }) });
 }
 
 export function observeUnknown<T>(rawValue: string, known: Readonly<Record<string, T>>): ReadValue<T> {

@@ -14,6 +14,6 @@ contexts:
   - evaluation-corpus
 requiredLayers: [domain, application, infrastructure]
 publicEntrypoint: index.ts
-allowedCrossContextTargets: [published-language, application]
+allowedCrossContextTargets: [published-language]
 forbiddenPublicSegments: [infrastructure]
 upstreamPackages: [ruflo, claude-flow, "@claude-flow/cli", metaharness, "@metaharness/darwin", "@metaharness/flywheel", "@metaharness/redblue", "@metaharness/turn-credit", "@metaharness/router", "@metaharness/harness", "@metaharness/kernel", "@metaharness/host-claude-code", "@metaharness/host-codex", ruvector, "@ruvector/rvf"]

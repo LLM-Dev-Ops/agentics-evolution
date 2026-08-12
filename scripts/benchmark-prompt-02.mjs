@@ -30,14 +30,26 @@ const envelope = createEnvelope({ envelopeSchema: "agentics.evolution-envelope/v
   ...identity, cycleId: cycleId("benchmark-cycle"), actorId: actorId("benchmark-actor"), occurredAt: utcInstant("2026-08-12T00:00:00.000Z"),
   causationId: newCausationId(), correlationId: newCorrelationId(), idempotencyKey: newIdempotencyKey(), policyEpoch: 1,
   sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }), evidence: [reference], payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId } });
-const registry = new EnvelopeSchemaRegistry(); registry.register("HypothesisProposed", 1, () => {});
+const registry = new EnvelopeSchemaRegistry(); registry.register("HypothesisProposed", 1, { allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
+for (const type of ["CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"])
+  registry.register(type, 1, { allowedFields: ["tenantId", "repositoryId"], requiredFields: ["tenantId", "repositoryId"] });
+const histories = Array.from({ length: 2_500 }, (_, historyIndex) => {
+  const scoped = { ...identity, aggregateId: aggregateId(`benchmark-aggregate-${historyIndex}`) };
+  const history = ["HypothesisProposed", "CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"].map((type, step) => createEnvelope({
+    ...envelope, ...scoped, id: newEventId(), type, idempotencyKey: newIdempotencyKey(), occurredAt: utcInstant(`2026-08-12T00:00:0${step}.000Z`)
+  }));
+  return { scoped, history };
+});
 const results = [
   measure("uuidv7-parse", generated.length, (index) => eventId(generated[index]), 5_000),
   measure("scoped-identity-parse", 100_000, (index) => {
     tenantId(`tenant-${index}`); repositoryId(`repo-${index}`); aggregateId(`aggregate-${index}`);
   }, 5_000),
   measure("canonical-envelope-encode", 100_000, () => encodeEnvelope(envelope), 10_000),
-  measure("ten-thousand-event-replay", 1, () => replayTrust(identity, Array(10_000).fill(envelope), registry, () => evidenceBytes, () => true), 5_000),
+  measure("ten-thousand-unique-event-replay", histories.length, (index) => {
+    const terminal = replayTrust(histories[index].scoped, histories[index].history, registry, () => evidenceBytes, () => true);
+    if (terminal.state !== "AUTHORIZED" || terminal.version !== 4 || !terminal.historyDigest) throw new Error("replay terminal invariant failed");
+  }, 10_000),
   measure("ddd-repository-scan", 1, () => execFileSync(process.execPath, ["scripts/check-ddd-boundaries.mjs"], { stdio: "ignore" }), 10_000)
 ];
 await writeFile("reports/prompt-02-benchmark.json", `${JSON.stringify({ schemaVersion: "agentics.prompt-02-benchmark/v1", node: process.version,

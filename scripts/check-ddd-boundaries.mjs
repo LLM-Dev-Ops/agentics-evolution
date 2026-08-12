@@ -52,6 +52,9 @@ function checkReference(file, specifier, isExport) {
   const from = contextParts(file);
   if (config.upstreamPackages.includes(packageName(specifier)))
     errors.push(`${from.location}: raw upstream type/import '${specifier}' leaks into a bounded context`);
+  if (!specifier.startsWith(".") && !specifier.startsWith("node:") && specifier !== config.packageName &&
+      !specifier.startsWith(`${config.packageName}/`) && !config.upstreamPackages.includes(packageName(specifier)))
+    errors.push(`${from.location}: unresolved external/alias import '${specifier}' is forbidden in bounded contexts`);
   if (!expected.has(from.context)) return;
   const target = targetParts(file, specifier);
   if (specifier.startsWith(".")) {
@@ -91,6 +94,11 @@ function checkEvents(ast, location) {
       const readonlyAggregate = node.members.some((member) => member.name?.getText(ast).replace(/["']/g, "") === "aggregateId" &&
         member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword));
       if (!readonlyAggregate) errors.push(`${location}: domain event '${name}' aggregateId must be readonly`);
+      for (const field of ["tenantId", "repositoryId", "occurredAt", "correlationId", "causationId", "idempotencyKey"]) {
+        const member = node.members.find((candidate) => candidate.name?.getText(ast).replace(/["']/g, "") === field);
+        if (!member || !member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword))
+          errors.push(`${location}: domain event '${name}' must carry readonly ${field}`);
+      }
     }
     ts.forEachChild(node, inspect);
   };

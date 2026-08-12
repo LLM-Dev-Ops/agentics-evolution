@@ -1,43 +1,40 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign, verify } from "node:crypto";
+import { generateKeyPairSync, sign } from "node:crypto";
 import {
-  actorId, aggregateId, authorizeServing, causationId, correlationId, createEnvelope, cycleId, decodeEnvelope, digestBytes, digestReference,
+  actorId, aggregateId, authorizeServing, canonicalJson, causationId, correlationId, createEnvelope, cycleId, decodeEnvelope, digestBytes, digestReference,
+  Ed25519AuthorityEvidenceVerifier,
   emptyTrustAggregate, encodeEnvelope, EnvelopeSchemaRegistry, eventId, idempotencyKey, money,
   moneyFromWire, moneyToWire, newCausationId, newCorrelationId, newEventId, newIdempotencyKey,
-  replayTrust, repositoryId, sourceSnapshot, tenantId, transitionTrust, utcInstant
+  replayTrust, repositoryId, sourceSnapshot, tenantId, transitionEventBinding, transitionTrust, utcInstant
 } from "../dist/index.js";
 
 const identity = Object.freeze({ tenantId: tenantId("tenant-a"), repositoryId: repositoryId("repo-a"), aggregateId: aggregateId("aggregate-a") });
 const events = ["HypothesisProposed", "CandidateGenerated", "EvaluationAccepted", "PromotionAuthorized"];
 const authorities = ["Dream", "Darwin", "Flywheel", "Governance"];
 const authorityKeys = generateKeyPairSync("ed25519");
+const authorityVerifier = new Ed25519AuthorityEvidenceVerifier(authorities.map((authority) => ({ authority, keyId: `${authority.toLowerCase()}-key`, publicKeyPem: authorityKeys.publicKey.export({ type: "spki", format: "pem" }) })));
 const trustRegistry = new EnvelopeSchemaRegistry();
-for (const type of [...events, "AuthorizationRevoked"]) trustRegistry.register(type, 1, () => {});
+for (const type of [...events, "AuthorizationRevoked"]) trustRegistry.register(type, 1, { allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId", "repositoryId"] });
 const evidenceStore = new Map();
 const resolveEvidence = (reference) => evidenceStore.get(reference.uri) ?? new Uint8Array();
-const verifyAuthority = ({ authority, event, bytes }) => {
-  const signed = JSON.parse(new TextDecoder().decode(bytes));
-  const document = JSON.stringify(signed.document);
-  return signed.document.authority === authority && signed.document.tenantId === event.tenantId &&
-    signed.document.repositoryId === event.repositoryId && signed.document.aggregateId === event.aggregateId &&
-    signed.document.eventType === event.type && signed.document.policyEpoch === event.policyEpoch &&
-    verify(null, Buffer.from(document), authorityKeys.publicKey, Buffer.from(signed.signature, "base64"));
-};
+const verifyAuthority = authorityVerifier.verify;
 function envelope(type, index, overrides = {}) {
   const authority = authorities[index] ?? "Governance";
-  const document = { authority, tenantId: overrides.tenantId ?? identity.tenantId, repositoryId: overrides.repositoryId ?? identity.repositoryId,
-    aggregateId: overrides.aggregateId ?? identity.aggregateId, eventType: type, policyEpoch: overrides.policyEpoch ?? 1 };
-  const documentBytes = Buffer.from(JSON.stringify(document));
-  const evidenceBytes = new TextEncoder().encode(JSON.stringify({ document, signature: sign(null, documentBytes, authorityKeys.privateKey).toString("base64") }));
+  const base = { envelopeSchema: "agentics.evolution-envelope/v1", schemaVersion: 1, id: newEventId(), type, ...identity,
+    cycleId: cycleId("cycle-a"), actorId: actorId("actor-a"), occurredAt: utcInstant(`2026-08-12T00:00:0${index}.000Z`),
+    causationId: newCausationId(), correlationId: newCorrelationId(), idempotencyKey: newIdempotencyKey(), policyEpoch: 1,
+    sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }), evidence: [],
+    payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId, step: index }, ...overrides };
+  const eventBinding = transitionEventBinding(base);
+  const statement = { schema: "agentics.authority-evidence/v1", keyId: `${authority.toLowerCase()}-key`, authority, eventBinding,
+    verdict: authority === "Dream" ? "VALIDATED" : authority === "Darwin" ? "ADMITTED" : authority === "Flywheel" ? "PROVED" : "AUTHORIZED" };
+  const signature = sign(null, Buffer.from(canonicalJson(statement)), authorityKeys.privateKey).toString("base64");
+  const evidenceBytes = new TextEncoder().encode(JSON.stringify({ ...statement, signature }));
   const evidenceSha = digestBytes(evidenceBytes);
   const evidence = digestReference({ uri: `cas://sha256/${evidenceSha}`, sha256: evidenceSha });
   evidenceStore.set(evidence.uri, evidenceBytes);
-  return createEnvelope({ envelopeSchema: "agentics.evolution-envelope/v1", schemaVersion: 1,
-    id: newEventId(), type, ...identity, cycleId: cycleId("cycle-a"), actorId: actorId("actor-a"),
-    occurredAt: utcInstant(`2026-08-12T00:00:0${index}.000Z`), causationId: newCausationId(), correlationId: newCorrelationId(),
-    idempotencyKey: newIdempotencyKey(), policyEpoch: 1, sourceRef: sourceSnapshot({ commit: "a".repeat(40), dirtySnapshot: null }),
-    evidence: [evidence], payload: { tenantId: identity.tenantId, repositoryId: identity.repositoryId, step: index }, ...overrides });
+  return createEnvelope({ ...base, evidence: [evidence] });
 }
 
 test("UUIDv7 identifiers validate version, variant, uniqueness, and lexical time order", () => {
@@ -92,11 +89,12 @@ test("envelope is canonical, immutable, closed, registered, and tamper evident",
   assert.deepEqual(encodeEnvelope(value), encodeEnvelope(structuredClone(value)));
   assert.throws(() => createEnvelope({ ...value, surprise: true }), /unknown critical/);
   const registry = new EnvelopeSchemaRegistry();
-  registry.register("HypothesisProposed", 1, (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); });
-  registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, () => {}), /already/);
+  registry.register("HypothesisProposed", 1, { allowedFields: ["tenantId", "repositoryId", "step"], requiredFields: ["tenantId"], validate: (payload) => { if (payload.tenantId !== identity.tenantId) throw new TypeError("cross-tenant payload"); } });
+  registry.validate(value); assert.throws(() => registry.register("HypothesisProposed", 1, { allowedFields: [] }), /already/);
   assert.deepEqual(decodeEnvelope(encodeEnvelope(value), registry), value);
   assert.throws(() => decodeEnvelope(new TextEncoder().encode("not json"), registry), /INVALID_ENVELOPE_JSON/);
   assert.throws(() => registry.validate(envelope("CandidateGenerated", 1)), /UNKNOWN_SCHEMA_VERSION/);
+  assert.throws(() => registry.validate(envelope("HypothesisProposed", 0, { payload: { tenantId: "tenant-a", repositoryId: "repo-a", surprise: true } })), /unknown critical payload/);
   assert.throws(() => envelope("HypothesisProposed", 0, { payload: { tenantId: "tenant-b", authority: "Dream" } }), /cross-tenant/);
   assert.throws(() => envelope("HypothesisProposed", 0, { payload: { repositoryId: "repo-b", authority: "Dream" } }), /cross-repository/);
   assert.notEqual(digestBytes(encodeEnvelope(value)), digestBytes(encodeEnvelope(envelope("HypothesisProposed", 0, { payload: { ...value.payload, step: 9 } }))));

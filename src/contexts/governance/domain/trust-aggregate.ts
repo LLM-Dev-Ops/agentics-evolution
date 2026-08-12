@@ -1,9 +1,9 @@
-import { AggregateIdentity, sameScope } from "../shared-kernel/identity.js";
-import { DigestReference, Sha256Digest, digestBytes, verifyDigest } from "../shared-kernel/digest.js";
-import { EvolutionEnvelope, envelopeDigest } from "../shared-kernel/evolution-envelope.js";
-import { ServingAuthorization, TrustCommand, TrustState, TransitionEvidence, transitionTrust } from "../shared-kernel/trust-state.js";
-import { canonicalJson } from "../shared-kernel/immutable.js";
-import { EnvelopeSchemaRegistry } from "../shared-kernel/schema-registry.js";
+import { AggregateIdentity, sameScope } from "../../../shared-kernel/identity.js";
+import { DigestReference, Sha256Digest, digestBytes, verifyDigest } from "../../../shared-kernel/digest.js";
+import { EvolutionEnvelope, envelopeDigest } from "../../../shared-kernel/evolution-envelope.js";
+import { ServingAuthorization, TrustCommand, TrustState, TransitionEvidence, transitionTrust } from "../../../shared-kernel/trust-state.js";
+import { canonicalJson } from "../../../shared-kernel/immutable.js";
+import { EnvelopeSchemaRegistry } from "../../../shared-kernel/schema-registry.js";
 
 export interface TrustAggregate extends AggregateIdentity {
   readonly state: TrustState | null;
