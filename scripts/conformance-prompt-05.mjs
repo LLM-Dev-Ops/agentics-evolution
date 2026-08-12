@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { validateTapEvidence } from "./lib/tap-evidence.mjs";
 const execution=JSON.parse(await readFile("reports/test-execution.json","utf8"));if(execution.schema!=="agentics.test-execution/v2"||execution.status!==0)throw new Error("PROMPT_05_TEST_EVIDENCE_FAILED");
 const controls=[
+ ["PROMPT-05.EVIDENCE_SEMANTICS","evidence-semantics.test.mjs","evidence semantics reject failed, skipped, and missing required assertions"],
  ["ADR-006.ACTIONS","governance-domain.test.mjs","seeded 10k shrinking property preserves subset transitivity"],
  ["ADR-006.APPROVAL","governance-postgres-live.test.mjs","live PG authorization bounds 100 concurrent consumers and isolates tenants"],
  ["ADR-006.IDENTITY","governance-identity-privacy.test.mjs","cryptographic OIDC verifies human MFA and server-side service mappings"],

@@ -1,5 +1,6 @@
 import { withSerializableRetry, type PostgresPersistence } from "../../persistence/postgres.js";
 import type { DeletionBoundary, DeletionCategory, DeletionReceiptSigner, DeletionResult, DeletionTombstone, SignedDeletionReceipt } from "../../contexts/governance/application/privacy-boundaries.js";
+import {consumeDeletionAuthorization,type VerifiedDeletionAuthorization}from"../../contexts/governance/application/deletion-authorization.js";
 
 const categories: readonly DeletionCategory[] = ["DATABASE", "ARTIFACT", "EVENT", "CACHE", "VECTOR", "KEY", "BACKUP_OBLIGATION"];
 export class PostgresDeletionWorkflow {
@@ -7,12 +8,12 @@ export class PostgresDeletionWorkflow {
   constructor(private readonly database: PostgresPersistence, boundaries: readonly DeletionBoundary[], private readonly signer: DeletionReceiptSigner, private readonly now: () => Date = () => new Date()) {
     this.adapters = new Map(boundaries.map((value) => [value.category, value])); for (const category of categories) if (!this.adapters.has(category)) throw new TypeError(`DELETION_BOUNDARY_MISSING:${category}`);
   }
-  async request(tombstone: DeletionTombstone): Promise<void> {
+  async request(authorization: VerifiedDeletionAuthorization): Promise<void> {const tombstone=consumeDeletionAuthorization(authorization);
     if (tombstone.state !== "ACTIVE") throw new TypeError("ACTIVE_DELETION_TOMBSTONE_REQUIRED");
     await this.database.tenantTransaction(tombstone.tenantId, "SERIALIZABLE", async (client) => {
       const prior = await client.query("SELECT request_id,policy_epoch FROM governance_deletion_tombstones WHERE tenant_id=$1 AND repository_id=$2 FOR UPDATE", [tombstone.tenantId,tombstone.repositoryId]);
       if (prior.rowCount) { if (prior.rows[0].request_id !== tombstone.requestId || Number(prior.rows[0].policy_epoch) !== tombstone.policyEpoch) throw new TypeError("DELETION_TOMBSTONE_CONFLICT"); return; }
-      await client.query("INSERT INTO governance_deletion_tombstones(tenant_id,repository_id,request_id,requested_at,policy_epoch,state) VALUES($1,$2,$3,$4,$5,'ACTIVE')", [tombstone.tenantId,tombstone.repositoryId,tombstone.requestId,tombstone.requestedAt,tombstone.policyEpoch]);
+      await client.query("INSERT INTO governance_deletion_tombstones(tenant_id,repository_id,request_id,requested_at,policy_epoch,state,approval_binding) VALUES($1,$2,$3,$4,$5,'ACTIVE',$6)", [tombstone.tenantId,tombstone.repositoryId,tombstone.requestId,tombstone.requestedAt,tombstone.policyEpoch,authorization.evidence]);
       for (const category of categories) await client.query("INSERT INTO governance_deletion_jobs(tenant_id,repository_id,request_id,category) VALUES($1,$2,$3,$4)", [tombstone.tenantId,tombstone.repositoryId,tombstone.requestId,category]);
     });
   }

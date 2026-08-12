@@ -13,3 +13,4 @@ export * from "./tenant-boundaries.js";
 export * from "./verified-approval.js";
 export * from "./enforcement-middleware.js";
 export * from "./delegation-resolver.js";
+export * from "./deletion-authorization.js";

@@ -1,4 +1,5 @@
 import type { RepositoryId, TenantId } from "../../../shared-kernel/identity.js";
+import { consumeDeletionAuthorization, type VerifiedDeletionAuthorization } from "./deletion-authorization.js";
 
 export interface DeletionTombstone { readonly schema: "agentics.deletion-tombstone/v1"; readonly tenantId: TenantId; readonly repositoryId: RepositoryId;
   readonly requestId: string; readonly requestedAt: string; readonly policyEpoch: number; readonly state: "ACTIVE" | "COMPLETED"; }
@@ -15,7 +16,7 @@ export interface SignedDeletionReceipt { readonly payload: DeletionReceiptPayloa
 export interface DeletionReceiptSigner { sign(payload: DeletionReceiptPayload): Promise<SignedDeletionReceipt>; }
 export class DeletionCoordinator {
   constructor(private readonly boundaries: readonly DeletionBoundary[], private readonly signer: DeletionReceiptSigner, private readonly now: () => Date = () => new Date()) {}
-  async execute(tombstone: DeletionTombstone): Promise<SignedDeletionReceipt> {
+  async execute(authorization: VerifiedDeletionAuthorization): Promise<SignedDeletionReceipt> {const tombstone=consumeDeletionAuthorization(authorization);
     if (tombstone.state !== "ACTIVE") throw new TypeError("ACTIVE_DELETION_TOMBSTONE_REQUIRED"); const categories = new Set(this.boundaries.map(({ category }) => category));
     for (const required of ["DATABASE", "ARTIFACT", "EVENT", "CACHE", "VECTOR", "KEY", "BACKUP_OBLIGATION"] as const) if (!categories.has(required)) throw new TypeError(`DELETION_BOUNDARY_MISSING:${required}`);
     const results: DeletionResult[] = []; for (const boundary of this.boundaries) { const operationKey = `${tombstone.requestId}/${boundary.category}`; const result = await boundary.delete(tombstone, operationKey);
